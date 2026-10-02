@@ -264,7 +264,7 @@ def run_keys():
         # tipped well back to keep looking down the track
         key(hips, frame, ry=bank, x=shift_x, z=bob - 0.34)  # sitting low
         key(chest, frame, rx=-58, rz=-bank * 1.2)
-        key(head, frame, rx=70, ry=-bank * 0.6)
+        key(head, frame, rx=84, ry=-bank * 0.6)
     # The arms float on their own: bobbing once per push, a beat behind the body, swaying a little
     for frame in range(0, RUN_FRAMES + 1, 3):
         phase = 2 * math.pi * frame / RUN_FRAMES
@@ -354,7 +354,7 @@ def land_keys(hand):
     # ...into the lunge the run carries on from
     key(hips, 22, ry=12 * m, x=0.12 * m, z=-0.89)
     key(chest, 22, rx=-58, rz=-14 * m)
-    key(head, 22, rx=70)
+    key(head, 22, rx=84)
     key(knee_thigh, 22, rx=76, ry=4 * m)
     key(knee_shin, 22, rx=-86)
     key(front_thigh, 22, rx=-52, ry=-20 * m)

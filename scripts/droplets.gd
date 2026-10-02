@@ -22,8 +22,8 @@ var _pool: Array[MeshInstance3D] = []
 func _ready() -> void:
 	top_level = true # world space: they're left behind and caught up with, not carried along
 	var sphere := SphereMesh.new()
-	sphere.radius = 0.09
-	sphere.height = 0.18
+	sphere.radius = 0.05
+	sphere.height = 0.1
 	sphere.radial_segments = 10
 	sphere.rings = 6
 	for i in MAX:
@@ -50,7 +50,7 @@ func burst(count: int, strength := 1.0) -> void:
 		fling -= source.forward() * randf_range(1.0, 3.0)
 		var view: MeshInstance3D = _pool.pop_back()
 		view.visible = true
-		var size := randf_range(0.6, 1.5)
+		var size := randf_range(0.5, 1.1)
 		view.scale = Vector3.ONE * size
 		view.global_position = part.global_position + offset
 		_live.append({

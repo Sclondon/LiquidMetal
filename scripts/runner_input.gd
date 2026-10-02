@@ -5,6 +5,11 @@ extends Node
 ##   tap and hold the left/right half of the screen = turn that way.
 ##   the DASH button = a burst of speed.
 ## Keyboard: Space/W/Up jump, S/Down duck, Left/Right arrows dodge, A/D held turn, Shift/E dash.
+## Gamepad: left stick turn, A / D-pad up jump, B / D-pad down duck, X dash, LB / RB or D-pad
+## left / right dodge (a hard flick of the right stick sideways dodges too).
+
+const STICK_DEADZONE := 0.2
+var _flicked := false # the right stick's been flicked and not yet let back to the middle
 
 signal jump
 signal duck
@@ -45,6 +50,24 @@ func _input(event: InputEvent) -> void:
 			touch.pos = event.position
 			if not touch.used:
 				_try_swipe(touch, event.position)
+	elif event is InputEventJoypadButton and event.pressed:
+		match event.button_index:
+			JOY_BUTTON_A, JOY_BUTTON_DPAD_UP:
+				jump.emit()
+			JOY_BUTTON_B, JOY_BUTTON_DPAD_DOWN:
+				duck.emit()
+			JOY_BUTTON_X, JOY_BUTTON_Y:
+				dash.emit()
+			JOY_BUTTON_LEFT_SHOULDER, JOY_BUTTON_DPAD_LEFT:
+				dodge.emit(-1.0)
+			JOY_BUTTON_RIGHT_SHOULDER, JOY_BUTTON_DPAD_RIGHT:
+				dodge.emit(1.0)
+	elif event is InputEventJoypadMotion and event.axis == JOY_AXIS_RIGHT_X:
+		if not _flicked and absf(event.axis_value) > 0.7:
+			_flicked = true
+			dodge.emit(signf(event.axis_value))
+		elif absf(event.axis_value) < 0.3:
+			_flicked = false
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
 			KEY_SPACE, KEY_W, KEY_UP:
@@ -85,5 +108,10 @@ func _process(_delta: float) -> void:
 		keys -= 1.0
 	if Input.is_physical_key_pressed(KEY_D):
 		keys += 1.0
-	turn = clampf(held + keys, -1.0, 1.0)
+	var stick := 0.0
+	for pad in Input.get_connected_joypads():
+		var x := Input.get_joy_axis(pad, JOY_AXIS_LEFT_X)
+		if absf(x) > STICK_DEADZONE:
+			stick += signf(x) * (absf(x) - STICK_DEADZONE) / (1.0 - STICK_DEADZONE)
+	turn = clampf(held + keys + stick, -1.0, 1.0)
 

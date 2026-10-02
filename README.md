@@ -4,7 +4,10 @@ A 3D auto runner for the Scareathon arcade: you are Mercury, a figure of liquid 
 
 The menu has two modes: **ENDLESS RUN** (a lane that never ends and speeds up the further you get; one splat
 ends the run; your best distance is saved) and **TEST AREA** (the playground; a splat rewinds you a moment).
-Esc (or TUNE → Menu) goes back to the menu.
+Esc (or TUNE → Menu, or Start on a gamepad) goes back to the menu.
+
+Gamepad: left stick turn, A / D-pad up jump, B / D-pad down duck, X dash, LB / RB (or D-pad left / right,
+or a flick of the right stick) dodge.
 
 | Do | Touch / mouse | Keys |
 | --- | --- | --- |

@@ -23,6 +23,8 @@ var _wall_time := 0.0
 var _wall_lost := 0.0 # seconds without touching the wall (a short grace before dropping off)
 var _wall_cooldown := 0.0
 var _wall_roll := 0.0 # the figure turned onto its side, smoothed
+var _wall_tween: Tween # the puddle splatted against something
+var _since_dodge := 99.0 # seconds since a dodge began (and which way: _dodge_dir)
 const JUMP_BUFFER := 0.2 # seconds a jump pressed in the air is kept for the landing
 # The slide: a quick hop, then SPLAT, the whole figure squashed flat into one puddle that skims
 # along the floor, wobbling, eyes glinting at the front; then it pops back up out of it, tall
@@ -210,8 +212,8 @@ func _ready() -> void:
 	add_child(_trail)
 
 	var splash := SphereMesh.new()
-	splash.radius = 0.05
-	splash.height = 0.1
+	splash.radius = 0.035
+	splash.height = 0.07
 	splash.radial_segments = 6
 	splash.rings = 3
 	splash.material = _figure_material
@@ -392,6 +394,7 @@ func _on_dodge(direction: float) -> void:
 		return
 	_dodge_dir = direction
 	_dodge_left = DODGE_TIME
+	_since_dodge = 0.0
 	_trick("dodge", direction, 0.34)
 	_agitation = 1.0
 	_liquid_hold = 0.3
@@ -455,6 +458,7 @@ func _physics_process(delta: float) -> void:
 	elif not is_on_floor():
 		velocity.y -= GRAVITY * (FAST_FALL if _fast_fall else 1.0) * delta
 	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
+	_since_dodge += delta
 	dash_cooldown = maxf(dash_cooldown - delta, 0.0)
 	# Builds back up to running speed (sliding as a puddle and landing hard slow it)
 	speed = move_toward(speed, run_speed, ACCELERATION * delta) # (a slide keeps its speed)
@@ -476,7 +480,7 @@ func _physics_process(delta: float) -> void:
 		var hit := get_slide_collision(i)
 		var normal := hit.get_normal()
 		if normal.y < 0.5 and normal.dot(forward()) < -0.6:
-			_splat()
+			_splat(hit.get_position(), normal)
 			return
 		if absf(normal.y) < 0.3 and absf(normal.dot(forward())) < 0.5:
 			side_wall = Vector3(normal.x, 0.0, normal.z).normalized()
@@ -489,7 +493,8 @@ func _physics_process(delta: float) -> void:
 			_wall_lost += delta
 		if is_on_floor() or _wall_lost > 0.12 or _wall_time > WALL_RUN_MAX:
 			_end_wall_run()
-	elif side_wall != Vector3.ZERO and not is_on_floor() and _wall_cooldown <= 0.0 and not ducking:
+	elif side_wall != Vector3.ZERO and _since_dodge < 0.45 and _dodge_dir == -signf(side_wall.dot(right())) and _wall_cooldown <= 0.0 and not ducking:
+		# (only from a side dodge into the wall)
 		wall_running = true
 		_wall_normal = side_wall
 		_wall_time = 0.0
@@ -699,12 +704,17 @@ func _room_to_stand() -> bool:
 	return get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
 
 
-func _splat() -> void:
+## Hit something: flattened into a puddle up against it (point, normal: where and which way it
+## faces), that slides slowly down it; without one (fallen off the world), a splash
+func _splat(point := Vector3.INF, normal := Vector3.ZERO) -> void:
 	dead = true
 	velocity = Vector3.ZERO
-	_blob.visible = false
 	_figure.visible = false
-	_splash.restart()
+	if normal == Vector3.ZERO:
+		_blob.visible = false
+		_splash.restart()
+	else:
+		_wall_puddle(point, normal)
 	_droplets.clear()
 	_trail.lift() # break the tracks where it splatted
 	for spray in _foot_splash:
@@ -723,7 +733,31 @@ func _splat() -> void:
 	get_tree().create_timer(RESPAWN_DELAY).timeout.connect(_respawn_at.bind(spot, facing))
 
 
+func _wall_puddle(point: Vector3, normal: Vector3) -> void:
+	var flat := Vector3(normal.x, 0.0, normal.z).normalized()
+	var across := flat.cross(Vector3.UP).normalized()
+	# The puddle's thin axis (its y) along the wall's normal
+	var facing := Basis(across, flat, across.cross(flat))
+	var centre := Vector3(point.x, global_position.y + 0.75, point.z) + flat * 0.06
+	for eye in _puddle_eyes:
+		eye.visible = false
+	_blob.visible = true
+	_blob.global_transform = Transform3D(facing.scaled_local(Vector3(0.3, 0.1, 0.3)), centre)
+	_material.set_shader_parameter("splash", 1.0)
+	_puddle_splash = 1.0
+	if _wall_tween:
+		_wall_tween.kill()
+	_wall_tween = create_tween()
+	# Slapped flat against it, spreading with a wobble, then sliding slowly down
+	_wall_tween.tween_property(_blob, "scale", Vector3(1.5, 0.22, 1.9), 0.35).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	_wall_tween.parallel().tween_property(_blob, "global_position", centre + Vector3.DOWN * 0.45, RESPAWN_DELAY + 1.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	_droplets.clear()
+
+
 func _respawn_at(spot: Vector3, facing: float) -> void:
+	if _wall_tween:
+		_wall_tween.kill()
+		_wall_tween = null
 	global_position = spot
 	heading = facing
 	steer = 0.0

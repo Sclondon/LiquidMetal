@@ -60,6 +60,7 @@ func show_title(best: int) -> void:
 	_best_label.text = "BEST  %d m" % best if best > 0 else "HOLD TO TURN · SWIPE TO MOVE"
 	_shade.visible = true
 	_title.visible = true
+	_focus_first(_title)
 	_over.visible = false
 
 
@@ -69,6 +70,7 @@ func show_game_over(metres: int, drops: int, best: int, new_best: bool) -> void:
 	_shade.visible = true
 	_title.visible = false
 	_over.visible = true
+	_focus_first(_over)
 
 
 func hide_all() -> void:
@@ -79,6 +81,13 @@ func hide_all() -> void:
 
 func is_open() -> bool:
 	return _shade.visible
+
+
+func _focus_first(box: Control) -> void:
+	for child in box.get_children():
+		if child is Button:
+			child.grab_focus.call_deferred()
+			return
 
 
 func _heading(text: String, size: int) -> Label:
@@ -97,6 +106,6 @@ func _button(text: String, pressed: Callable) -> Button:
 	button.text = text
 	button.custom_minimum_size = Vector2(380, 84)
 	button.add_theme_font_size_override("font_size", 34)
-	button.focus_mode = Control.FOCUS_NONE
+	button.focus_mode = Control.FOCUS_ALL # (a gamepad moves between them and presses A)
 	button.pressed.connect(pressed)
 	return button

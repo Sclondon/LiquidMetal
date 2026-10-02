@@ -47,6 +47,8 @@ var _damping: Array[float] = []
 var _reach: Array[float] = [] # how far a part may swing from its pose
 var _springs_ready := false
 var _clock := 0.0
+var _head_jiggle: Node3D
+var _arm_pump := 0.0
 var _splash: Array[float] = []
 # The tips of the shins (left, right): where the feet are
 var _feet: Array[MeshInstance3D] = []
@@ -98,6 +100,8 @@ func _ready() -> void:
 		if view.name.begins_with("arm_"):
 			_hands[String(view.name).right(1)] = jiggle
 			_hand_tip = Vector3(0.0, box.position.y, 0.0)
+		if view.name.begins_with("head"):
+			_head_jiggle = jiggle
 		if view.name.begins_with("shin"):
 			var tip := Vector3(0.0, box.position.y, 0.0) # the point at the bottom
 			if view.name.ends_with("L"):
@@ -311,8 +315,24 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 	for i in _splash.size():
 		_splash[i] = move_toward(_splash[i], 0.0, _delta * 1.6)
 		_part_materials[i].set_shader_parameter("splash", _splash[i])
-	# Into a turn: the body swung round to face into it (stepping that way) and leaning into it
+	# Into a turn: the body swung round to face into it (stepping that way) and leaning into it,
+	# the head turned further still, looking round the corner
 	_model.rotation = Vector3(0.0, -steer * 0.4, -steer * 0.5)
+	# The stride's phase (0..1 over the cycle: left lunge at 0, right at 0.5) drives the little
+	# extras: the head turning a touch with each stride, and the arms pumping when slow
+	var phase := 0.0
+	if _anim.current_animation == "run":
+		phase = _anim.current_animation_position / maxf(_anim.current_animation_length, 0.01)
+	var stride := sin(phase * TAU) if pose == "run" else 0.0
+	if _head_jiggle:
+		_head_jiggle.rotation = Vector3(0.0, -steer * 0.7 + stride * 0.16, 0.0)
+	# Slow (getting up to speed): the arms pump hard, each against its leg; gone by full speed
+	var pump := clampf(maxf(effort, (10.0 - speed) / 6.0), 0.0, 1.0) * (1.0 if pose == "run" else 0.0)
+	_arm_pump = lerpf(_arm_pump, pump, 1.0 - exp(-_delta * 6.0))
+	for side in _hands:
+		var arm: Node3D = _hands[side]
+		var swing := stride * (1.0 if side == "L" else -1.0) # the left arm forward on the right lunge
+		arm.rotation = Vector3(swing * 1.0 * _arm_pump, 0.0, 0.0)
 	_bounce(_delta)
 
 
@@ -372,5 +392,5 @@ func _bounce(delta: float) -> void:
 			var wob := sin(_clock * 17.0 + i * 1.7) * 0.22 * jelly
 			var wob2 := sin(_clock * 13.0 + i * 2.9) * 0.16 * jelly
 			shape *= Vector3(1.0 + wob, 1.0 - wob + wob2, 1.0 - wob2)
-		_jiggles[i].scale = shape
+		_jiggles[i].basis = Basis.from_euler(_jiggles[i].rotation) * Basis.from_scale(shape) # (keeps the head's look)
 	_springs_ready = true

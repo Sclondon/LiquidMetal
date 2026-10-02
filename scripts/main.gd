@@ -87,6 +87,12 @@ func _ready() -> void:
 			show_menu()
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	# Gamepad Start: back to the menu
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START and mode != "menu":
+		show_menu()
+
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event.pressed or event.echo:
 		return
@@ -172,7 +178,7 @@ func _on_splat() -> void:
 	var new_best := metres > _best
 	if new_best:
 		_best = metres
-		if start_mode == "menu": # real play (the tests open straight into a mode): keep it
+		if not OS.get_cmdline_args().has("-s"): # real play, not a test script: keep it
 			_save_best(_best)
 	_input.set_process_input(false)
 	# Let the splat land first
