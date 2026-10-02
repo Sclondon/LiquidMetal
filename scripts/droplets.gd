@@ -4,6 +4,8 @@ extends Node3D
 ## merge in. Purely for looks (no collisions). The player calls burst() on steps, landings,
 ## dodges and dashes.
 
+signal rejoined(part: Node3D) # a blob merged back in
+
 const MAX := 32
 const FREE_TIME := 0.22 # seconds of free flight before the pull back starts
 const PULL := 70.0 # spring strength of the pull back
@@ -89,6 +91,7 @@ func _process(delta: float) -> void:
 		view.scale = Vector3(1.0, 1.0, 1.0 + stretch) * drop.size
 		# Rejoined: close enough (or out too long), it merges back in
 		if (drop.age > FREE_TIME and view.global_position.distance_to(home) < 0.12) or drop.age > 1.4:
+			rejoined.emit(drop.part)
 			view.visible = false
 			_pool.append(view)
 			_live.remove_at(i)

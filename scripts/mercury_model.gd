@@ -30,8 +30,11 @@ var _last_pos: Array[Vector3] = []
 var _stiffness: Array[float] = []
 var _deform: Array[float] = []
 var _springs_ready := false
+var _splash: Array[float] = []
+var _last_root := Vector3.ZERO
+var _root_velocity := Vector3.ZERO
 var _anim: AnimationPlayer
-var _airborne := false
+var _pose := "run"
 
 
 func _ready() -> void:
@@ -78,11 +81,14 @@ func _ready() -> void:
 		elif view.name.begins_with("head"):
 			stiffness = 100.0
 		_stiffness.append(stiffness * randf_range(0.85, 1.15))
+		own.set_shader_parameter("ball_radius", clampf(box.size.length() * 0.24, 0.1, 0.3))
 		_deform.append(deform)
+		_splash.append(0.0)
 		var ball := MeshInstance3D.new()
 		ball.mesh = ball_mesh
 		ball.material_override = _ball_material
 		ball.position = box.get_center()
+		ball.scale = Vector3.ONE * 0.001 # sized each frame once it shows
 		ball.visible = false
 		jiggle.add_child(ball)
 		_balls.append(ball)
@@ -105,26 +111,49 @@ func parts() -> Array[Node3D]:
 	return _parts
 
 
+## Something just joined this part (a droplet back, the balls setting): it ripples
+func ripple(part: Node3D, amount := 1.0) -> void:
+	var index := _parts.find(part)
+	if index >= 0:
+		_splash[index] = maxf(_splash[index], amount)
+
+
+## Every part ripples at once
+func ripple_all(amount := 1.0) -> void:
+	for i in _splash.size():
+		_splash[i] = maxf(_splash[i], amount)
+
+
 ## Shards to balls of liquid (1) and back (0), quickly; the player sets the target each frame
 func set_liquid(target: float, delta: float) -> void:
-	_liquid = move_toward(_liquid, target, delta * (14.0 if target > _liquid else 6.0))
-	var ball := smoothstep(0.0, 1.0, _liquid)
+	# Melts over ~0.15 s, sets back into shards over ~0.25 s: slow enough to see it happen
+	var was := _liquid
+	_liquid = move_toward(_liquid, target, delta * (7.0 if target > _liquid else 4.0))
+	if was > 0.5 and _liquid <= 0.5:
+		ripple_all() # the balls running back together into shards
+	var melt := smoothstep(0.0, 1.0, _liquid)
 	var agitation: float = material.get_shader_parameter("agitation")
 	for i in _parts.size():
-		_part_materials[i].set_shader_parameter("collapse", ball)
-		_part_materials[i].set_shader_parameter("agitation", agitation)
-		_balls[i].visible = ball > 0.02
-		_balls[i].scale = Vector3.ONE * _ball_radius[i] * ball
+		# The shard itself swells and rounds off onto its ball...
+		_part_materials[i].set_shader_parameter("collapse", melt)
+		_part_materials[i].set_shader_parameter("agitation", maxf(agitation, melt))
+		# ...while the true ball grows inside it, only reaching full size as the shard does
+		_balls[i].visible = melt > 0.3
 	for eye in _eyes:
-		eye.visible = ball < 0.5
+		eye.visible = melt < 0.5
 
 
-## Pose for this frame. speed: ground speed; airborne + vertical speed; steer -1..1
-func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float) -> void:
-	if airborne != _airborne:
-		_airborne = airborne
-		_anim.play("jump" if airborne else "run", BLEND)
-	_anim.speed_scale = maxf(speed, 1.0) / RUN_PACE if not airborne else 1.0
+## Pose for this frame. speed: ground speed; airborne + vertical speed; steer -1..1; sliding:
+## dropping into a duck
+func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float, sliding := false) -> void:
+	var pose := "slide" if sliding else ("jump" if airborne else "run")
+	if pose != _pose:
+		_pose = pose
+		_anim.play(pose, BLEND)
+	_anim.speed_scale = maxf(speed, 1.0) / RUN_PACE if pose == "run" else 1.0
+	for i in _splash.size():
+		_splash[i] = move_toward(_splash[i], 0.0, _delta * 1.6)
+		_part_materials[i].set_shader_parameter("splash", _splash[i])
 	_model.rotation.z = -steer * 0.25 # lean into turns
 	_bounce(_delta)
 
@@ -132,6 +161,11 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 func _bounce(delta: float) -> void:
 	if delta <= 0.0:
 		return
+	var root := global_position
+	if _springs_ready:
+		_root_velocity = (root - _last_root) / delta
+	_last_root = root
+	var melt := smoothstep(0.0, 1.0, _liquid)
 	for i in _parts.size():
 		var part: Node3D = _parts[i]
 		var target := part.global_position
@@ -158,6 +192,16 @@ func _bounce(delta: float) -> void:
 			spot = target + offset
 		_spring_pos[i] = spot
 		_spring_vel[i] = velocity
+		# The ball of liquid (when there is one) stretches along how it's moving relative to the
+		# body and squashes back as it settles
+		if _balls[i].visible:
+			var radius := _ball_radius[i] * part.global_basis.get_scale().x * clampf((melt - 0.3) / 0.7, 0.0, 1.0)
+			var relative := velocity - _root_velocity
+			var stretch := clampf(relative.length() * 0.045, 0.0, 0.45)
+			var along := relative.normalized() if relative.length() > 0.05 else Vector3.UP
+			var up := Vector3.UP if absf(along.y) < 0.98 else Vector3.RIGHT
+			var shape := Basis.looking_at(along, up) * Basis.from_scale(Vector3(1.0 - stretch * 0.35, 1.0 - stretch * 0.35, 1.0 + stretch))
+			_balls[i].global_basis = shape.scaled_local(Vector3.ONE * maxf(radius, 0.001))
 		# Into the part's own space (its scale included), so the mesh sits where the spring is
 		var local := part.global_basis.inverse() * offset
 		_jiggles[i].position = local

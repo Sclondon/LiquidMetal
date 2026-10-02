@@ -10,6 +10,7 @@
 # Animations (NLA tracks; each becomes one glTF animation across all the parts):
 #   run  - 36 frames at 30 fps, looping: long, snappy strides, each a deep lunge, body
 #          banking over the front leg, leaning forward, arms trailing back ninja-run style
+#   slide - drops into a slide (lead leg out, the other folded under, leaning back) and holds it
 #   jump - snaps from the push-off into a leap (knees tucked, arms swept back) and holds it
 
 import math
@@ -290,6 +291,30 @@ def jump_keys():
         ninja_arms(frame, rx=-6)
 
 
+def slide_keys():
+    thigh_l, shin_l = legs["L"]
+    thigh_r, shin_r = legs["R"]
+    # Dropping into a slide (before melting into a puddle): low, leaning back, the lead leg shot
+    # out straight in front, the other folded under, arms out wide for balance
+    key(hips, 0, z=-0.2)
+    key(chest, 0, rx=-12)
+    key(head, 0)
+    key(thigh_l, 0, rx=40)
+    key(shin_l, 0, rx=-40)
+    key(thigh_r, 0, rx=-10)
+    key(shin_r, 0, rx=-60)
+    ninja_arms(0, rx=10)
+    for frame in (5, 8):
+        key(hips, frame, rx=22, z=-0.85)
+        key(chest, frame, rx=14)
+        key(head, frame, rx=-18)  # still looking where it's going
+        key(thigh_l, frame, rx=84)
+        key(shin_l, frame, rx=-4)
+        key(thigh_r, frame, rx=30, ry=-12)
+        key(shin_r, frame, rx=-125)
+        ninja_arms(frame, rx=36)
+
+
 def bake(track_name, keyer, interpolation):
     animated = [o for o in scene.objects if o.type == "MESH" and not o.name.startswith("eye_")]
     animated.append(hips)
@@ -315,6 +340,7 @@ def bake(track_name, keyer, interpolation):
 
 bake("run", run_keys, "EXPO")  # snaps between the poses and holds them
 bake("jump", jump_keys, "QUART")
+bake("slide", slide_keys, "QUART")
 
 scene.frame_start = 0
 scene.frame_end = RUN_FRAMES

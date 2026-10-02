@@ -12,6 +12,7 @@ const FAST_FALL := 2.6 # gravity multiplier when you swipe down in the air
 const DODGE_DIST := 3.0
 const DODGE_TIME := 0.16
 const DUCK_TIME := 0.75
+const SLIDE_LEAD := 0.2 # seconds in the slide pose before melting into the puddle
 const STAND := { radius = 0.5, height = 1.3 }
 const PUDDLE := { radius = 0.3, height = 0.6 }
 const BLOB_RADIUS := 0.55
@@ -38,6 +39,7 @@ var _dodge_left := 0.0
 var _dodge_dir := 0.0
 var _dash_left := 0.0
 var _drip_clock := 0.0
+var _slide_clock := 0.0 # how long it's been ducking
 var _liquid_hold := 0.0 # seconds more to stay as balls of liquid after a move
 var _duck_left := 0.0
 var _fast_fall := false
@@ -112,6 +114,7 @@ func _ready() -> void:
 	_droplets.source = self
 	add_child(_droplets)
 	_droplets.parts = _figure.parts()
+	_droplets.rejoined.connect(func(part): _figure.ripple(part, 0.7))
 
 	input.jump.connect(_on_jump)
 	input.duck.connect(_on_duck)
@@ -264,7 +267,10 @@ func _process(delta: float) -> void:
 		return
 
 	# Melts down fast (ducking has to be quick), pulls itself back up a little slower
-	_melt = move_toward(_melt, 1.0 if ducking else 0.0, delta * (8.0 if ducking else 3.5))
+	# A duck slides first, then melts
+	_slide_clock = _slide_clock + delta if ducking else 0.0
+	var puddle := ducking and _slide_clock > SLIDE_LEAD
+	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (8.0 if puddle else 3.5))
 	var melt := smoothstep(0.0, 1.0, _melt)
 
 	# Mercury: stretched by vertical speed in the air, squished on landing, flattening as it melts
@@ -280,7 +286,7 @@ func _process(delta: float) -> void:
 	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself)
 	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
 	_figure.rotation = Vector3(0.0, heading, lean)
-	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer)
+	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
 	var liquid := not is_on_floor() or is_dashing() or _liquid_hold > 0.0
