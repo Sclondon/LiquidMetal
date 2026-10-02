@@ -8,14 +8,16 @@ const FollowCam := preload("res://scripts/follow_cam.gd")
 const TestArea := preload("res://scripts/test_area.gd")
 const Hud := preload("res://scripts/hud.gd")
 
+var area: Node3D
 var player: CharacterBody3D
 var cam: Camera3D
+var n64: CanvasLayer # the N64 filter over the 3D (under the HUD)
 
 
 func _ready() -> void:
 	_build_environment()
 
-	var area := TestArea.new()
+	area = TestArea.new()
 	add_child(area)
 
 	var input := RunnerInput.new()
@@ -31,9 +33,23 @@ func _ready() -> void:
 	add_child(cam)
 	cam.snap()
 
+	n64 = CanvasLayer.new()
+	n64.layer = 1
+	var screen := ColorRect.new()
+	screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var filter := ShaderMaterial.new()
+	filter.shader = preload("res://shaders/n64.gdshader")
+	screen.material = filter
+	n64.add_child(screen)
+	add_child(n64)
+
 	var hud := Hud.new()
+	hud.layer = 2
+	hud.n64 = n64
 	hud.player = player
 	hud.cam = cam
+	hud.restart = restart
 	add_child(hud)
 	input.is_over_ui = hud.is_over_ui
 
@@ -44,8 +60,14 @@ func _ready() -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.pressed and not event.echo and event.physical_keycode == KEY_R:
-		player.restart()
-		cam.snap()
+		restart()
+
+
+## A freshly generated course, and back to the start of it
+func restart() -> void:
+	area.generate()
+	player.restart()
+	cam.snap()
 
 
 func _fit_ui() -> void:

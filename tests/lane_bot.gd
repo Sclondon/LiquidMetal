@@ -1,8 +1,9 @@
 extends SceneTree
-## Headless check: a bot runs the whole practice lane using only the player's controls
-## and reports any splats. Run: godot --headless --path . -s res://tests/lane_bot.gd
+## Headless check: a bot runs the whole practice lane using only the player's controls,
+## on several randomly generated lanes, and reports any splats. Run: godot --headless --path . -s res://tests/lane_bot.gd
 
 const TestArea := preload("res://scripts/test_area.gd")
+const RUNS := 5 # a freshly generated lane each run
 
 var main: Node
 var player: CharacterBody3D
@@ -10,6 +11,9 @@ var input: Node
 var splats := 0
 var done := {}
 var frames := 0
+var run := 1
+var run_started := 0
+var total_splats := 0
 
 
 func _initialize() -> void:
@@ -18,13 +22,11 @@ func _initialize() -> void:
 
 
 func _plan() -> Array:
-	# [z where to act, action]
+	# [z where to act, action], from the course the area generated
 	var actions := []
-	var pattern := ["hurdle", "beam", "dodge_left", "hurdle", "dodge_right", "beam", "hurdle_pair", "dodge_both"]
-	var z := TestArea.LANE_START
-	var i := 0
-	while z > TestArea.LANE_END:
-		match pattern[i % pattern.size()]:
+	for obstacle in main.area.lane_plan:
+		var z: float = obstacle.z
+		match obstacle.kind:
 			"hurdle":
 				actions.append([z + 4.5, "jump"])
 			"beam":
@@ -38,8 +40,6 @@ func _plan() -> Array:
 			"hurdle_pair":
 				actions.append([z + 6.0 + 4.5, "jump"])
 				actions.append([z - 6.0 + 4.5, "jump"])
-		z -= TestArea.LANE_STEP
-		i += 1
 	return actions
 
 
@@ -68,7 +68,18 @@ func _process(_delta: float) -> bool:
 				"duck": input.duck.emit()
 				"left": input.dodge.emit(-1.0)
 				"right": input.dodge.emit(1.0)
-	if z < TestArea.LANE_END - 10.0 or Time.get_ticks_msec() > 60000:
-		print("LANE RUN: reached z=%.1f, x=%.2f, splats=%d, drops=%d" % [z, player.global_position.x, splats, player.drops])
-		return true
+	if z < TestArea.LANE_END - 10.0 or Time.get_ticks_msec() - run_started > 40000:
+		var kinds: Array = main.area.lane_plan.map(func(o): return o.kind)
+		print("LANE RUN %d: reached z=%.1f, x=%.2f, splats=%d  %s" % [run, z, player.global_position.x, splats, kinds])
+		total_splats += splats
+		if run >= RUNS:
+			print("LANE BOT: %d runs, %d splats" % [RUNS, total_splats])
+			return true
+		# Next run: a new course, from the start
+		run += 1
+		splats = 0
+		done.clear()
+		main.restart()
+		plan = _plan()
+		run_started = Time.get_ticks_msec()
 	return false

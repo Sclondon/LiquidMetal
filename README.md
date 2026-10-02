@@ -8,16 +8,18 @@ A 3D auto runner for the Scareathon arcade: you are Mercury, a figure of liquid 
 | Jump | swipe up | Space, W, Up |
 | Duck (melt into a puddle) | swipe down (in the air: dive, then puddle) | S, Down |
 | Dodge (sidestep 3 m) | swipe left / right | Left / Right arrows |
-| Back to start | TUNE → Back to start | R |
+| Dash (burst of speed, then a cooldown) | DASH button, bottom right | Shift, E |
+| New course, back to the start | TUNE → New course | R |
 
 Hitting something head-on splats you; you pull back together about a second back along your path.
 
 ## Test area (current state)
 
 `scenes/main.tscn` builds everything in code (`scripts/main.gd`):
-- `test_area.gd` – 300 m walled grid floor. Practice lane straight ahead: hurdles (orange, jump),
-  beams (cyan, duck), half walls (magenta, dodge). Around it: a pillar field, a cone slalom,
-  a 30 m duck tunnel and kicker ramps. Mercury drops to collect (they come back).
+- `test_area.gd` – 300 m walled grid floor with a randomly generated course (new on every restart): a practice
+  lane of hurdles (orange, jump), beams (cyan, duck) and half walls (magenta, dodge) in random order and spacing,
+  a random field of columns, walls and slabs, a slalom, a duck tunnel and kicker ramps. Mercury drops to collect.
+  Obstacles use the Tron shader (`shaders/obstacle.gdshader`).
 - `player.gd` – the runner (CharacterBody3D), its moves, splat and rewind; melts into a puddle to duck.
 - `mercury_model.gd` – Mercury in the game: loads `models/mercury.glb`, puts the metal shader on it, plays its `run` / `jump`.
 
@@ -32,11 +34,13 @@ exports `models/mercury.glb`:
 
 If you edit the .blend by hand instead, export glTF (.glb) to `models/mercury.glb` with Animation mode "NLA Tracks".
 - `runner_input.gd` – swipe / hold / keyboard → signals and a turn axis.
-- `follow_cam.gd`, `hud.gd` (TUNE panel: speed, turn rate, jump height, camera).
+- `droplets.gd` – little blobs that flop off Mercury as it moves and get pulled back in.
+- `follow_cam.gd`, `hud.gd` (DASH button; TUNE panel: speed, turn rate, jump height, camera, N64 filter).
+- `shaders/n64.gdshader` – the N64 look: ~240-line picture, soft bilinear upscale, 16-bit colour with dither.
 
 ## Tests (headless)
 
-    godot --headless --path . -s res://tests/lane_bot.gd     # bot runs the lane with the controls: 0 splats
+    godot --headless --path . -s res://tests/lane_bot.gd     # bot runs 5 random lanes with the controls: 0 splats
     godot --headless --path . -s res://tests/touch_test.gd   # fake touches: hold turns, swipes jump/duck/dodge
     godot --path . -s res://tests/shots.gd -- <dir>          # screenshots (needs a window)
 

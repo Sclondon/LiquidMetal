@@ -46,6 +46,7 @@ func _process(delta: float) -> bool:
 		return false
 	match step:
 		0:
+			player.run_speed = 5.0 # stay short of the lane's first obstacle for the whole test
 			wait = 0.5 # let it settle on the floor
 		1:
 			heading0 = player.heading

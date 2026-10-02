@@ -5,12 +5,13 @@ extends Node3D
 ## a held pose). Faces -Z.
 
 const MODEL_SCALE := 0.66 # the .glb is ~3.1 m to the horn tip; this makes it ~2 m
-const RUN_PACE := 14.0 # run speed (m/s) at which the stride plays at its authored rate
+const RUN_PACE := 12.0 # run speed (m/s) at which the stride plays at its authored rate
 const BLEND := 0.08 # seconds to blend between run and jump: snappy
 
 var material: Material
 
 var _model: Node3D
+var _parts: Array[Node3D] = []
 var _anim: AnimationPlayer
 var _airborne := false
 
@@ -26,11 +27,19 @@ func _ready() -> void:
 	eye_material.albedo_color = Color(1.0, 0.1, 0.08)
 	for view in _model.find_children("*", "MeshInstance3D", true, false):
 		var original: Material = view.mesh.surface_get_material(0)
-		view.material_override = eye_material if original and original.resource_name == "Eye" else material
+		var eye: bool = original and original.resource_name == "Eye"
+		view.material_override = eye_material if eye else material
+		if not eye:
+			_parts.append(view)
 
 	_anim = _model.find_child("AnimationPlayer", true, false)
 	_anim.get_animation("run").loop_mode = Animation.LOOP_LINEAR
 	_anim.play("run")
+
+
+## The metal body parts (where droplets come off and go back to)
+func parts() -> Array[Node3D]:
+	return _parts
 
 
 ## Pose for this frame. speed: ground speed; airborne + vertical speed; steer -1..1

@@ -5,7 +5,7 @@ extends SceneTree
 var main: Node
 var player: CharacterBody3D
 var t := 0.0
-var shots := [[1.0, "start"], [2.55, "jump"], [4.0, "duck"], [5.6, "dodge"], [7.2, "turn"]]
+var shots := [[1.0, "start"], [1.25, "dash"], [2.55, "jump"], [4.0, "duck"], [5.6, "dodge"], [7.2, "turn"]]
 var acted := {}
 
 
@@ -28,6 +28,9 @@ func _process(delta: float) -> bool:
 	if z < 63.0 + 6.0 and not acted.has("l"):
 		acted.l = true
 		input.dodge.emit(-1.0)
+	if t > 1.1 and not acted.has("dash_go"):
+		acted.dash_go = true
+		input.dash.emit()
 	if t > 6.2:
 		input.turn = -1.0
 	var out: String = OS.get_cmdline_user_args()[0]

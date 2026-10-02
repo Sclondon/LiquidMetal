@@ -8,6 +8,7 @@ var height := 2.8
 
 var _yaw := 0.0
 var _y := 0.0
+var _dash_fov := 0.0
 
 
 func _ready() -> void:
@@ -49,3 +50,6 @@ func _process(delta: float) -> void:
 	else:
 		keep_aspect = Camera3D.KEEP_HEIGHT
 		fov = 64.0 + target.run_speed * 0.4
+	# A kick wider on a dash
+	_dash_fov = lerpf(_dash_fov, 12.0 if target.is_dashing() else 0.0, 1.0 - exp(-get_process_delta_time() * 10.0))
+	fov += _dash_fov

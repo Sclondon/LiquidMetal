@@ -4,6 +4,7 @@ extends CharacterBody3D
 ## head-on into something splats it, and it pulls itself back together a moment earlier.
 
 signal splatted
+signal dashed
 signal drops_changed(total: int)
 
 const GRAVITY := 42.0
@@ -16,6 +17,9 @@ const PUDDLE := { radius = 0.3, height = 0.6 }
 const BLOB_RADIUS := 0.55
 const RESPAWN_DELAY := 0.9
 const REWIND := 1.2 # seconds back along your path a splat sends you
+const DASH_BOOST := 2.2 # times run speed
+const DASH_TIME := 0.35
+const DASH_COOLDOWN := 1.2
 
 # Tunables (the HUD's tuning panel changes these live)
 var run_speed := 14.0
@@ -28,9 +32,12 @@ var steer := 0.0 # smoothed turn input, -1..1
 var drops := 0
 var ducking := false
 var dead := false
+var dash_cooldown := 0.0 # seconds until the next dash (the HUD's button shows it)
 
 var _dodge_left := 0.0
 var _dodge_dir := 0.0
+var _dash_left := 0.0
+var _drip_clock := 0.0
 var _duck_left := 0.0
 var _fast_fall := false
 var _was_on_floor := true
@@ -46,6 +53,7 @@ var _blob := MeshInstance3D.new() # the puddle it melts into
 var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
 var _figure_material := ShaderMaterial.new()
+var _droplets := preload("res://scripts/droplets.gd").new()
 var _melt := 0.0 # 0 = Mercury standing, 1 = a puddle (ducking, or pulling back together)
 var _splash := CPUParticles3D.new()
 
@@ -70,12 +78,7 @@ func _ready() -> void:
 
 	_figure_material.shader = _material.shader
 	_figure_material.set_shader_parameter("ripple", 0.35) # facets: only a shimmer
-	# Plain silver chrome, like the concept art (the puddle and splash too)
-	for material in [_figure_material, _material]:
-		material.set_shader_parameter("sky_top", Color(0.5, 0.53, 0.6))
-		material.set_shader_parameter("horizon", Color(1.0, 0.97, 0.97))
-		material.set_shader_parameter("ground", Color(0.16, 0.17, 0.2))
-		material.set_shader_parameter("grid_glow", Color(0.5, 0.55, 0.7))
+	# (the same dusk-lit liquid metal as the drops you collect)
 	_figure.material = _figure_material
 	add_child(_figure)
 
@@ -103,9 +106,16 @@ func _ready() -> void:
 	_splash.position.y = 0.5
 	add_child(_splash)
 
+	# Blobs that flop off as it moves and rejoin it
+	_droplets.material = _figure_material
+	_droplets.source = self
+	add_child(_droplets)
+	_droplets.parts = _figure.parts()
+
 	input.jump.connect(_on_jump)
 	input.duck.connect(_on_duck)
 	input.dodge.connect(_on_dodge)
+	input.dash.connect(_on_dash)
 
 
 func forward() -> Vector3:
@@ -144,6 +154,7 @@ func _on_jump() -> void:
 		velocity.y = sqrt(2.0 * GRAVITY * jump_height)
 		_squash = -0.25 # a stretch on take-off
 		_agitation = 1.0
+		_droplets.burst(3)
 
 
 func _on_duck() -> void:
@@ -162,6 +173,22 @@ func _on_dodge(direction: float) -> void:
 	_dodge_dir = direction
 	_dodge_left = DODGE_TIME
 	_agitation = 1.0
+	_droplets.burst(3, 0.8)
+
+
+func is_dashing() -> bool:
+	return _dash_left > 0.0
+
+
+## A burst of speed straight ahead, then a cooldown
+func _on_dash() -> void:
+	if dead or dash_cooldown > 0.0:
+		return
+	_dash_left = DASH_TIME
+	dash_cooldown = DASH_COOLDOWN
+	_agitation = 1.0
+	_droplets.burst(6, 1.3)
+	dashed.emit()
 
 
 func _physics_process(delta: float) -> void:
@@ -178,7 +205,12 @@ func _physics_process(delta: float) -> void:
 
 	if not is_on_floor():
 		velocity.y -= GRAVITY * (FAST_FALL if _fast_fall else 1.0) * delta
-	var ground := forward() * run_speed + right() * sideways
+	dash_cooldown = maxf(dash_cooldown - delta, 0.0)
+	var speed := run_speed
+	if _dash_left > 0.0:
+		speed *= DASH_BOOST
+		_dash_left -= delta
+	var ground := forward() * speed + right() * sideways
 	velocity.x = ground.x
 	velocity.z = ground.z
 	move_and_slide()
@@ -197,6 +229,7 @@ func _physics_process(delta: float) -> void:
 	var on_floor := is_on_floor()
 	if on_floor and not _was_on_floor:
 		_squash = 0.3
+		_droplets.burst(5)
 		_agitation = 1.0
 		_fast_fall = false
 		if _duck_left > 0.0:
@@ -236,12 +269,20 @@ func _process(delta: float) -> void:
 		var s := clampf(velocity.y / 30.0, -0.2, 0.25)
 		stretch = Vector3(1.0 - s * 0.5, 1.0 + s, 1.0 - s * 0.5)
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
+	if is_dashing():
+		stretch *= Vector3(0.88, 0.92, 1.35) # drawn out along the dash
 	_figure.scale = stretch.lerp(Vector3(1.6, 0.06, 1.6), melt)
 	_figure.visible = melt < 0.97
 	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself)
 	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
 	_figure.rotation = Vector3(0.0, heading, lean)
-	_figure.animate(delta, run_speed, not is_on_floor(), velocity.y, steer)
+	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer)
+
+	# Now and then, running, a blob or two shakes loose
+	_drip_clock -= delta
+	if _drip_clock <= 0.0 and is_on_floor() and melt < 0.1:
+		_drip_clock = randf_range(0.15, 0.45)
+		_droplets.burst(randi_range(1, 2), 0.7)
 
 	# The puddle swells as Mercury sinks into it
 	_blob.visible = melt > 0.03
@@ -283,6 +324,7 @@ func _splat() -> void:
 	_blob.visible = false
 	_figure.visible = false
 	_splash.restart()
+	_droplets.clear()
 	splatted.emit()
 	var back := clampi(_history.size() - int(REWIND / 0.1), 0, _history.size())
 	var spot: Vector3 = _spawn.origin
@@ -308,4 +350,7 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	dead = false
 	# Pulls itself back together out of a puddle
 	_melt = 1.0
+	_dash_left = 0.0
+	dash_cooldown = 0.0
+	_droplets.clear()
 	_agitation = 1.0

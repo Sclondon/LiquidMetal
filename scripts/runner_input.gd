@@ -3,11 +3,13 @@ extends Node
 ## runner controls:
 ##   swipe up = jump, swipe down = duck, swipe left/right = dodge,
 ##   tap and hold the left/right half of the screen = turn that way.
-## Keyboard: Space/W/Up jump, S/Down duck, Left/Right arrows dodge, A/D held turn.
+##   the DASH button = a burst of speed.
+## Keyboard: Space/W/Up jump, S/Down duck, Left/Right arrows dodge, A/D held turn, Shift/E dash.
 
 signal jump
 signal duck
 signal dodge(direction: float) # -1 left, +1 right
+signal dash # the DASH button (or Shift / E)
 
 const SWIPE_DIST := 40.0 # UI pixels before a press counts as a swipe
 const SWIPE_TIME := 0.4 # a swipe has to get that far within this long
@@ -53,6 +55,8 @@ func _input(event: InputEvent) -> void:
 				dodge.emit(-1.0)
 			KEY_RIGHT:
 				dodge.emit(1.0)
+			KEY_SHIFT, KEY_E:
+				dash.emit()
 
 
 func _try_swipe(touch: Dictionary, pos: Vector2) -> void:

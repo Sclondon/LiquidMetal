@@ -3,13 +3,13 @@
 # Writes art/mercury.blend (to open and tweak by hand) and models/mercury.glb (what Godot loads).
 #
 # Every body part is its own floating shard with its pivot at its joint: a sharp mask for a
-# head with the spikes growing out of it (three horns, the middle one biggest), chest, pelvis,
+# head with one big spike growing out of it, raked back, chest, pelvis,
 # shoulder spikes, blade arms, and long two-piece legs (a big thigh blade, then a shin blade to
 # a point, with a guard rising above the knee). Faces +Y in Blender (= -Z in Godot).
 #
 # Animations (NLA tracks; each becomes one glTF animation across all the parts):
-#   run  - 24 frames at 30 fps, looping: a skating stride (push out to the side, glide), body
-#          banking over the gliding leg, leaning forward, arms swept back ninja-run style
+#   run  - 20 frames at 30 fps, looping: a snappy skating stride (push out to the side, glide), body
+#          banking over the gliding leg, leaning forward, arms trailing back ninja-run style
 #   jump - snaps from the push-off into a leap (knees tucked, arms swept back) and holds it
 
 import math
@@ -146,8 +146,7 @@ add_shard(bm, [(0.42, 0.52, 0.26), (0.5, 0.34, 0.18)], top=None, bottom=0.0)
 chest = mesh_object("chest", bm, (0, 0, 0.17), hips)
 
 # Head: a sharp mask (pointed brow, cheekbones, a chin to a point) with a small skull behind
-# it, and the spikes growing out of the mask: three horns off the brow, the middle one
-# biggest, and a short point off each brow corner
+# it, and one big spike growing out of the top of the mask, raked back
 bm = bmesh.new()
 mask_outline = [
     (0.0, 0.25), (-0.09, 0.17), (-0.23, 0.23), (-0.19, 0.06), (-0.15, -0.04), (-0.06, -0.14), (0.0, -0.23),
@@ -155,10 +154,7 @@ mask_outline = [
 ]
 add_mask(bm, mask_outline, rim=0.03, front=(0, 0.13, 0.04), back=(0, -0.03, 0.04))
 add_shard(bm, [(0.04, 0.2, 0.17)], top=0.17, bottom=-0.1, offset=(0, -0.08, 0))
-add_spike(bm, (0, 0.0, 0.2), (0, -0.07, 0.8), 0.06)
-for s in (-1, 1):
-    add_spike(bm, (s * 0.12, 0.0, 0.18), (s * 0.34, -0.06, 0.55), 0.045)
-    add_spike(bm, (s * 0.21, 0.0, 0.2), (s * 0.4, -0.05, 0.3), 0.03)
+add_spike(bm, (0, -0.01, 0.19), (0, -0.48, 0.86), 0.085)
 head = mesh_object("head", bm, (0, 0, 0.7), chest)
 for s in (-1, 1):
     bm = bmesh.new()
@@ -201,7 +197,7 @@ for obj in scene.objects:
 
 REST = {obj.name: (obj.location.copy(), obj.rotation_euler.copy()) for obj in scene.objects}
 deg = math.radians
-RUN_FRAMES = 24  # one push with each leg
+RUN_FRAMES = 20  # one push with each leg
 
 
 def key(obj, frame, rx=None, ry=None, rz=None, x=None, z=None):
@@ -224,8 +220,9 @@ def key(obj, frame, rx=None, ry=None, rz=None, x=None, z=None):
     obj.keyframe_insert("rotation_euler", frame=frame)
 
 
-def ninja_arms(frame, sway=0.0, rx=-74):
-    # Swept straight back, a little out, trailing behind like a ninja run
+def ninja_arms(frame, sway=0.0, rx=-28):
+    # Trailing back and a little out, like a ninja run (the chest's lean takes them further
+    # back, so this is on top of that)
     for tag, (arm, s) in arms.items():
         key(arm, frame, rx=rx + sway * s, ry=s * 14)
 
@@ -251,8 +248,9 @@ def run_keys():
     # The body rides over whichever leg is gliding: shifts and banks onto it, dips as the push
     # starts, rises as it snaps straight. The upper body leans well forward throughout (the
     # chest leans, not the hips, so the legs stay under it).
-    for frame, shift_x, bank, bob in ((0, -0.1, -9, 0.0), (6, -0.05, -5, -0.06), (10, 0.02, 2, 0.03),
+    for frame24, shift_x, bank, bob in ((0, -0.1, -9, 0.0), (6, -0.05, -5, -0.06), (10, 0.02, 2, 0.03),
                                       (12, 0.1, 9, 0.0), (18, 0.05, 5, -0.06), (22, -0.02, -2, 0.03), (24, -0.1, -9, 0.0)):
+        frame = round(frame24 * RUN_FRAMES / 24)  # laid out on a 24-frame cycle
         key(hips, frame, ry=bank, x=shift_x, z=bob - 0.08)
         key(chest, frame, rx=-32, rz=-bank * 1.2)
         key(head, frame, rx=36, ry=-bank * 0.6)  # head up against the lean, eyes on the track
@@ -271,7 +269,7 @@ def jump_keys():
     key(shin_l, 0, rx=-15)
     key(thigh_r, 0, rx=-20, ry=-4)
     key(shin_r, 0, rx=-10)
-    ninja_arms(0, rx=-60)
+    ninja_arms(0, rx=-20)
     for frame in (5, 8):
         key(hips, frame, rx=-12, z=0.05)
         key(chest, frame, rx=-30)
@@ -280,7 +278,7 @@ def jump_keys():
         key(shin_l, frame, rx=-125)
         key(thigh_r, frame, rx=50, ry=-10)
         key(shin_r, frame, rx=-115)
-        ninja_arms(frame, rx=-88)
+        ninja_arms(frame, rx=-40)
 
 
 def bake(track_name, keyer, interpolation):
@@ -305,7 +303,7 @@ def bake(track_name, keyer, interpolation):
         obj.location, obj.rotation_euler = REST[obj.name][0].copy(), REST[obj.name][1].copy()
 
 
-bake("run", run_keys, "SINE")  # smooth, gliding
+bake("run", run_keys, "EXPO")  # snaps between the poses and holds them
 bake("jump", jump_keys, "QUART")
 
 scene.frame_start = 0
