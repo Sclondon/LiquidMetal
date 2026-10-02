@@ -11,9 +11,26 @@ const AHEAD := 260.0 # built this far ahead of the runner
 const BEHIND := 40.0 # and cleared once it's this far behind
 const RUNWAY := 40.0 # clear lane at the start
 const KINDS := ["hurdle", "beam", "dodge_left", "dodge_right", "dodge_both", "hurdle_pair"]
+# Deeper zones add more: zone 2 zigzags, zone 3 tunnels (slide the length of them), zone 4 pillars
+const ZONE_KINDS := [[], ["zigzag"], ["tunnel"], ["pillars"]]
+const ZONE_LENGTH := 500.0
+## Each zone's look: name, sky overhead, horizon glow, fog, the floor grid's lines
+const ZONES := [
+	{ name = "NEON DUSK", top = Color(0.04, 0.05, 0.16), horizon = Color(0.95, 0.5, 0.48), fog = Color(0.5, 0.3, 0.42), lines = Color(0.15, 0.45, 1.0) },
+	{ name = "TOXIC TIDE", top = Color(0.02, 0.08, 0.05), horizon = Color(0.55, 1.0, 0.35), fog = Color(0.25, 0.45, 0.2), lines = Color(0.3, 1.0, 0.35) },
+	{ name = "ICE CIRCUIT", top = Color(0.02, 0.06, 0.14), horizon = Color(0.6, 0.9, 1.0), fog = Color(0.35, 0.5, 0.65), lines = Color(0.5, 0.95, 1.0) },
+	{ name = "INFERNO", top = Color(0.12, 0.02, 0.02), horizon = Color(1.0, 0.45, 0.1), fog = Color(0.55, 0.22, 0.1), lines = Color(1.0, 0.35, 0.1) },
+	{ name = "THE VOID", top = Color(0.01, 0.0, 0.03), horizon = Color(0.6, 0.2, 1.0), fog = Color(0.2, 0.08, 0.3), lines = Color(0.75, 0.3, 1.0) },
+]
+
+signal zone_changed(index: int, zone: Dictionary)
+
+var zone := 0
+var _floor_material: ShaderMaterial
 const GAP_EASY := 28.0 # metres between obstacles at the start...
 const GAP_HARD := 18.0 # ...closing to this by HARD_AT metres in
 const HARD_AT := 2500.0
+const TUNNEL := 10.0 # metres of low roof
 
 const JUMP_COLOR := Color(1.0, 0.5, 0.1)
 const DUCK_COLOR := Color(0.1, 0.85, 1.0)
@@ -60,6 +77,9 @@ func generate(seed := 0) -> void:
 		chunk.node.queue_free()
 	_chunks.clear()
 	lane_plan.clear()
+	zone = 0
+	if _floor_material:
+		_floor_material.set_shader_parameter("line_color", ZONES[0].lines)
 	if seed == 0:
 		_rng.randomize()
 	else:
@@ -80,6 +100,13 @@ func distance() -> float:
 
 
 func _physics_process(_delta: float) -> void:
+	if runner:
+		var now := int(distance() / ZONE_LENGTH)
+		if now != zone:
+			zone = now
+			var look: Dictionary = ZONES[zone % ZONES.size()]
+			create_tween().tween_property(_floor_material, "shader_parameter/line_color", look.lines, 2.0)
+			zone_changed.emit(zone, look)
 	if runner and with_enemies and distance() > 60.0 and enemies.size() < 2 and _rng.randf() < _delta * 0.2:
 		_spawn_enemy(runner.global_position.z + _rng.randf_range(22.0, 34.0)) # behind him: they chase
 	if runner == null:
@@ -125,12 +152,27 @@ func _build_chunk(from: float, to: float) -> void:
 	# Obstacles, closer together the further in
 	while _next_obstacle > to:
 		var z := _next_obstacle
-		var kind: String = KINDS[_rng.randi() % KINDS.size()]
+		var kinds := KINDS.duplicate()
+		var zone_here := int((start_position.z - z) / ZONE_LENGTH)
+		for k in mini(zone_here + 1, ZONE_KINDS.size()):
+			kinds.append_array(ZONE_KINDS[k])
+			kinds.append_array(ZONE_KINDS[k]) # (the new ones come up a bit more)
+		var kind: String = kinds[_rng.randi() % kinds.size()]
 		while kind == _last_kind:
-			kind = KINDS[_rng.randi() % KINDS.size()]
+			kind = kinds[_rng.randi() % kinds.size()]
 		_last_kind = kind
-		lane_plan.append({ z = z, kind = kind, half = _pair_half(z) })
-		_obstacle(node, kind, z)
+		var extra := 0.0
+		if kind == "zigzag": # a dodge one way, then the other
+			lane_plan.append({ z = z, kind = "dodge_left", half = 0.0 })
+			lane_plan.append({ z = z - 14.0, kind = "dodge_right", half = 0.0 })
+			_obstacle(node, "dodge_left", z)
+			_obstacle(node, "dodge_right", z - 14.0)
+			extra = 14.0
+		else:
+			lane_plan.append({ z = z, kind = kind, half = _pair_half(z) })
+			_obstacle(node, kind, z)
+			if kind == "tunnel":
+				extra = TUNNEL
 		for k in 3:
 			_drop(node, Vector3(_rng.randf_range(-2.0, 2.0) if k == 0 else 0.0, 0.0, z + 8.0 + k * 2.5))
 		# Now and then a boost pad, just past the obstacle
@@ -142,7 +184,7 @@ func _build_chunk(from: float, to: float) -> void:
 		var gap := lerpf(GAP_EASY, GAP_HARD, hard) * _rng.randf_range(0.9, 1.15)
 		if kind == "hurdle_pair":
 			gap += 10.0
-		gap += 4.0 # (room for a boost to settle) # room to land off the second hurdle before the next thing
+		gap += 4.0 + extra # (room for a boost to settle; and past a long one) # room to land off the second hurdle before the next thing
 		_next_obstacle -= gap
 
 
@@ -197,6 +239,11 @@ func _obstacle(node: Node3D, kind: String, z: float) -> void:
 			_block(node, Vector3(WIDTH * 0.62, 1.8, 0.6), Vector3(WIDTH * 0.19, 0.9, z), DODGE_COLOR)
 		"dodge_right":
 			_block(node, Vector3(WIDTH * 0.62, 1.8, 0.6), Vector3(-WIDTH * 0.19, 0.9, z), DODGE_COLOR)
+		"tunnel": # a low roof to slide the length of (from z on)
+			_block(node, Vector3(WIDTH, 0.5, TUNNEL), Vector3(0.0, 1.05, z - TUNNEL * 0.5), DUCK_COLOR)
+		"pillars": # two tall pillars: through the middle (or squeeze down a side)
+			for side in [-1.0, 1.0]:
+				_block(node, Vector3(2.4, 5.0, 1.0), Vector3(side * 2.95, 2.5, z), DODGE_COLOR) # (a 3.5 m gap between)
 		"dodge_both": # the middle blocked: either side
 			_block(node, Vector3(WIDTH * 0.3, 1.8, 0.6), Vector3(0.0, 0.9, z), DODGE_COLOR)
 
@@ -264,6 +311,7 @@ func _build_floor() -> void:
 	var material := ShaderMaterial.new()
 	material.shader = preload("res://shaders/grid_floor.gdshader")
 	view.material_override = material
+	_floor_material = material
 	_floor.add_child(view)
 	add_child(_floor)
 	# The lane's edges, glowing strips along the foot of the walls

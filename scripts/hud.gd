@@ -1,6 +1,9 @@
 extends CanvasLayer
-## Test-area HUD: drop count, the DASH button, and a TUNE panel with
-## sliders for the feel (speed, turning, jump, camera) plus a back-to-start button.
+## The HUD: a stats panel top left (what the mode's about: metres, wave, drops, smashes), a banner
+## for zones and waves, the round DASH button, and a TUNE panel with sliders for the feel (speed,
+## turning, jump, camera) plus restart / menu.
+
+const UI := preload("res://scripts/ui_theme.gd")
 
 var player: CharacterBody3D
 var cam: Camera3D
@@ -8,17 +11,18 @@ var restart: Callable # a new course, back at the start
 var to_menu: Callable # back to the title menu
 var n64: CanvasLayer # the N64 filter, switched in the TUNE panel
 
-var _drops := Label.new()
+var _stats_box := PanelContainer.new()
+var _big := Label.new() # e.g. "1234 m" or "WAVE 3"
+var _small := Label.new() # e.g. "ZONE 2 · 5 DROPS · 1 SMASHED"
+var _banner := Label.new()
 var _tune_button := Button.new()
 var _panel := PanelContainer.new()
 var _flash := ColorRect.new()
 var _dash := Button.new()
-var _distance := Label.new() # endless mode: metres run
 
 
 func _ready() -> void:
-	var theme := Theme.new()
-	theme.default_font_size = 22
+	var theme := UI.make()
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -30,20 +34,27 @@ func _ready() -> void:
 	_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(_flash)
 
-	_drops.position = Vector2(20, 14)
-	_drops.add_theme_font_size_override("font_size", 30)
-	_drops.add_theme_color_override("font_outline_color", Color.BLACK)
-	_drops.add_theme_constant_override("outline_size", 6)
-	root.add_child(_drops)
-	_on_drops(0)
-	_distance.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 12)
-	_distance.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_distance.add_theme_font_size_override("font_size", 44)
-	_distance.add_theme_color_override("font_outline_color", Color.BLACK)
-	_distance.add_theme_constant_override("outline_size", 8)
-	_distance.visible = false
-	root.add_child(_distance)
-	player.drops_changed.connect(_on_drops)
+	# The stats, top left on a glass panel
+	_stats_box.position = Vector2(14, 12)
+	_stats_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var lines := VBoxContainer.new()
+	lines.add_theme_constant_override("separation", -2)
+	_stats_box.add_child(lines)
+	_big.add_theme_font_size_override("font_size", 40)
+	_small.add_theme_font_size_override("font_size", 18)
+	_small.add_theme_color_override("font_color", UI.CYAN)
+	lines.add_child(_big)
+	lines.add_child(_small)
+	root.add_child(_stats_box)
+	set_stats("", "")
+	# The banner: zones, waves
+	_banner = UI.heading("", 64)
+	_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 0)
+	_banner.offset_top = 150
+	_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_banner.modulate.a = 0.0
+	_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(_banner)
 	player.splatted.connect(_on_splat)
 
 	_tune_button.text = "TUNE"
@@ -54,8 +65,15 @@ func _ready() -> void:
 
 	# DASH, bottom right, under your right thumb; dim while it recharges
 	_dash.text = "DASH"
-	_dash.custom_minimum_size = Vector2(130, 130)
+	_dash.custom_minimum_size = Vector2(140, 140)
 	_dash.add_theme_font_size_override("font_size", 28)
+	# Round
+	for state in ["normal", "hover", "pressed", "focus"]:
+		var round_box: StyleBoxFlat = (theme.get_stylebox(state, "Button") as StyleBoxFlat).duplicate()
+		round_box.set_corner_radius_all(70)
+		round_box.border_color = UI.PINK
+		round_box.set_border_width_all(4)
+		_dash.add_theme_stylebox_override(state, round_box)
 	_dash.focus_mode = Control.FOCUS_NONE
 	_dash.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 24)
 	_dash.grow_horizontal = Control.GROW_DIRECTION_BEGIN
@@ -143,17 +161,24 @@ func _process(_delta: float) -> void:
 	_dash.modulate.a = 0.4 if player.dash_cooldown > 0.0 else 1.0
 
 
-func show_distance(on: bool) -> void:
-	_distance.visible = on
-	set_distance(0)
+## What the stats panel shows (empty: hidden)
+func set_stats(big: String, small: String) -> void:
+	_big.text = big
+	_small.text = small
+	_small.visible = small != ""
+	_stats_box.visible = big != "" or small != ""
 
 
-func set_distance(metres: int) -> void:
-	_distance.text = "%d m" % metres
-
-
-func _on_drops(total: int) -> void:
-	_drops.text = "DROPS %d" % total
+## A big line across the middle that pops in and fades (a new zone, a new wave)
+func banner(text: String, sub := "") -> void:
+	_banner.text = text if sub == "" else "%s\n%s" % [text, sub]
+	_banner.pivot_offset = _banner.size * 0.5
+	var tween := create_tween()
+	_banner.scale = Vector2(1.4, 1.4)
+	tween.tween_property(_banner, "modulate:a", 1.0, 0.15)
+	tween.parallel().tween_property(_banner, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_interval(1.4)
+	tween.tween_property(_banner, "modulate:a", 0.0, 0.5)
 
 
 func _on_splat() -> void:

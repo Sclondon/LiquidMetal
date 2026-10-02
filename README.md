@@ -2,10 +2,17 @@
 
 A 3D auto runner for the Scareathon arcade: you are Mercury, a figure of liquid metal that runs on its own.
 
-The menu has two modes: **ENDLESS RUN** (a lane that never ends and speeds up the further you get; one splat
-ends the run; your best distance is saved) and **TEST AREA** (the playground; a splat rewinds you a moment).
-Red enemy runners (the same runner, AI-driven) share the endless lane: dash through them to blow them up
-(+3 drops); run into one without dashing and you splat. Dashes punch left, right, then a two-handed clap.
+The menu has three modes:
+- **ENDLESS RUN**: a lane that never ends. Every 500 m a new zone (NEON DUSK, TOXIC TIDE, ICE CIRCUIT, INFERNO,
+  THE VOID) with its own colours and new obstacles (zigzags, tunnels, pillars); faster and tighter as you go.
+  Score = metres + 5 per drop + 50 per enemy smashed; best saved.
+- **ARENA**: a walled 90 m square with cover; waves of red enemy runners (wave n sends n + 1) come at you.
+  Dash through them. One splat ends it; best wave saved.
+- **TEST AREA**: the playground; enemies chase you anywhere in it, splats just rewind you.
+
+Enemies are the same runner as you with an AI at the controls (scripts/ai_input.gd): they chase, jump,
+slide and swerve. Dash (or wind up a dash) through one to blow it up; get caught otherwise and you splat.
+Dashes punch left, right, then a two-handed clap; hold to charge.
 
 Esc (or TUNE → Menu, or Start on a gamepad) goes back to the menu.
 
@@ -55,6 +62,7 @@ If you edit the .blend by hand instead, export glTF (.glb) to `models/mercury.gl
 
     godot --headless --path . -s res://tests/wallrun_test.gd  # jump + dodge into the lane wall: wall run, jump off
     godot --headless --path . -s res://tests/endless_bot.gd  # bot plays endless mode to 1500 m: no splats
+    godot --headless --path . -s res://tests/arena_test.gd   # waves start, enemies close in, clearing brings the next
     godot --headless --path . -s res://tests/chase_test.gd   # an enemy spawned behind closes in and lines up
 
     godot --headless --path . -s res://tests/lane_bot.gd     # bot runs 5 random lanes with the controls: 0 splats

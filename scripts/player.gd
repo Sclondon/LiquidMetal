@@ -6,6 +6,7 @@ extends CharacterBody3D
 signal splatted
 signal dashed
 signal boosted
+signal smashed # dashed through an enemy
 signal drops_changed(total: int)
 
 const GRAVITY := 42.0
@@ -614,6 +615,7 @@ func _physics_process(delta: float) -> void:
 			# An enemy that's caught him: unless he's punching, he's splatted
 			if other.is_dashing() or other._dash_kick > 0.0 or other._charging:
 				blow_up(velocity)
+				other.smashed.emit()
 			else:
 				other._splat(hit.get_position(), -normal, self)
 			return
@@ -621,6 +623,7 @@ func _physics_process(delta: float) -> void:
 			if is_dashing() or _dash_kick > 0.0 or _charging:
 				# Dashed (or about to) straight through: it bursts apart
 				other.blow_up(velocity)
+				smashed.emit()
 				drops += 3
 				drops_changed.emit(drops)
 				_droplets.burst(4, 1.2)

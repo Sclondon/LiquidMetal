@@ -3,7 +3,7 @@ extends SceneTree
 ## course has laid (its lane_plan) as it goes, and should get a long way in without a splat as
 ## the speed climbs. Run: godot --headless --path . -s res://tests/endless_bot.gd
 
-const GOAL := 1500.0 # metres
+const GOAL := 2100.0 # metres
 
 var main: Node
 var done := {}
@@ -26,7 +26,9 @@ func _actions(obstacle: Dictionary, pace: float) -> Array:
 	match obstacle.kind:
 		"hurdle":
 			return [[z + 4.5 * pace, "jump"]]
-		"beam":
+		"pillars": # through the middle
+			return [[z + 7.0 * pace, "centre"]]
+		"beam", "tunnel":
 			return [[z + 3.0 * pace, "duck"]]
 		"dodge_left", "dodge_both":
 			return [[z + 6.0 * pace, "left"], [z - 2.0, "right"]]
@@ -48,8 +50,8 @@ func _process(_delta: float) -> bool:
 		for o in main.area.lane_plan:
 			if absf(o.z - player.global_position.z) < 30.0:
 				print("  nearby: %s at z %.1f (runner at z %.1f)" % [o.kind, o.z, player.global_position.z])
-	if splatted or main.area.distance() >= GOAL or Time.get_ticks_msec() > 150000:
-		print("ENDLESS BOT: %.0f m, speed %.1f, %s, enemies blown up %d" % [main.area.distance(), player.run_speed, "splatted" if splatted else "no splats", blown])
+	if splatted or main.area.distance() >= GOAL or Time.get_ticks_msec() > 220000:
+		print("ENDLESS BOT: %.0f m, zone %d, speed %.1f, %s, enemies blown up %d" % [main.area.distance(), main.area.zone + 1, player.run_speed, "splatted" if splatted else "no splats", blown])
 		return true
 	# An enemy closing in from behind on its line: sidestep and let it by
 	for enemy in main.area.enemies:
@@ -76,7 +78,7 @@ func _process(_delta: float) -> bool:
 		if is_instance_valid(enemy) and enemy.dead and not seen.has(enemy):
 			seen[enemy] = true
 			blown += 1
-	var pace: float = maxf(Vector2(player.velocity.x, player.velocity.z).length(), player.run_speed) / 14.0
+	var pace: float = maxf(-player.velocity.z, player.run_speed) / 14.0 # (forward speed only: not a dodge's sideways)
 	var z := player.global_position.z
 	var plan: Array = main.area.lane_plan
 	for k in plan.size():
@@ -87,8 +89,13 @@ func _process(_delta: float) -> bool:
 				continue
 			done[key] = true
 			match actions[a][1]:
+				"centre":
+					if absf(player.global_position.x) > 1.0:
+						player.input.dodge.emit(-signf(player.global_position.x))
 				"jump": player.input.jump.emit()
 				"duck": player.input.duck.emit()
-				"left": player.input.dodge.emit(-1.0)
-				"right": player.input.dodge.emit(1.0)
+				"left":
+					player.input.dodge.emit(-1.0)
+				"right":
+					player.input.dodge.emit(1.0)
 	return false

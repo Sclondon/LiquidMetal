@@ -19,6 +19,8 @@ var dash_button_down := false
 var body: CharacterBody3D # the enemy it drives
 var course: Node # has lane_plan: [{ z, kind, half? }]
 var target: CharacterBody3D # the player
+## Arena: straight at him whichever side of him it's on (not just from behind)
+var always_chase := false
 
 const CHASE_SPEED := 1.35 # times his run speed, while behind him
 const PASSED_SPEED := 0.78 # once past him
@@ -51,7 +53,7 @@ func _physics_process(delta: float) -> void:
 	var aim: Vector3 = body.global_position + body.forward() * 10.0
 	if target and not target.dead:
 		var to_him: Vector3 = target.global_position - body.global_position
-		var behind: bool = to_him.dot(target.forward()) > -1.0 # (it's behind him, or level)
+		var behind: bool = always_chase or to_him.dot(target.forward()) > -1.0 # (it's behind him, or level)
 		body.run_speed = target.run_speed * (CHASE_SPEED if behind else PASSED_SPEED)
 		aim = target.global_position + target.forward() * 2.0 if behind else body.global_position + target.forward() * 10.0
 	var to_aim: Vector3 = aim - body.global_position
@@ -120,7 +122,7 @@ func _read_lane() -> void:
 		match obstacle.kind:
 			"hurdle":
 				actions = [[oz + 4.5 * pace, "jump"]]
-			"beam":
+			"beam", "tunnel":
 				actions = [[oz + 3.0 * pace, "duck"]]
 			"dodge_left", "dodge_both":
 				actions = [[oz + 6.0 * pace, "left"]]
