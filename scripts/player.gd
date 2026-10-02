@@ -112,6 +112,7 @@ var _puddled := false # flat as a puddle (past the splat)
 var _sink := 0.0 # 0 in the dive pose .. 1 sunk right into the puddle
 const SINK_DELAY := 0.4 # seconds ducking before he sinks into it
 var _pool_offset := Vector3.ZERO # where the puddle sits under him
+var _bounce_t := 9.0 # seconds since snapping back up out of the puddle
 var _clock := 0.0
 var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
@@ -562,7 +563,7 @@ func _physics_process(delta: float) -> void:
 	# Melt back up once the duck runs out, unless there's something overhead
 	if ducking:
 		_duck_left -= delta
-		var held := Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)
+		var held: bool = input.duck_held()
 		if _duck_left <= 0.0 and not held:
 			_set_ducking(false)
 
@@ -589,15 +590,28 @@ func _process(delta: float) -> void:
 	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (SPLAT_RATE if puddle else POP_RATE))
 	var melt := _melt * _melt # eases in: slow to start, then slapped flat
 	# After a beat in the dive he sinks right down into the puddle, which swells
-	_sink = move_toward(_sink, 1.0 if ducking and _slide_clock > SINK_DELAY else 0.0, delta * (4.0 if ducking else 6.0))
-	if _melt > 0.7 and not _puddled:
-		# The puddle spreads out under him (with a little overshoot), while he holds the dive
-		_puddled = true
-		_pool_velocity += 2.5
+	# Held for a beat, he sinks right down into it: the little puddles run together into one big one
+	var sinking: bool = ducking and _slide_clock > SINK_DELAY and input.duck_held()
+	var was_sunk := _sink
+	_sink = move_toward(_sink, 1.0 if sinking else 0.0, delta * (4.0 if sinking else 9.0))
+	if _sink > 0.05 and was_sunk <= 0.05:
+		_merge_slide_dabs()
+		_pool_velocity += 3.0
 		_puddle_splash = 1.0
+	if _sink < 0.5 and was_sunk >= 0.5:
+		_bounce_t = 0.0 # let go: snapping back up out of it, with a bounce
+		_droplets.burst(4, 1.0)
+	if _melt > 0.7 and not _puddled:
+		# The dive: a little puddle under everything that's touching the floor
+		_puddled = true
+		_slide_dabs()
 	elif _melt < 0.3 and _puddled:
-		# Back up out of the dive, a few drops flung off
+		# Back up out of the dive, a few drops flung off, its little puddles gone with it
 		_puddled = false
+		for dab in _dabs:
+			if dab.visible and dab.get_meta("slide", false):
+				dab.visible = false
+				dab.set_meta("follow", -1)
 		_squash = -0.2
 		_droplets.burst(3, 0.8)
 
@@ -609,6 +623,11 @@ func _process(delta: float) -> void:
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
 	if is_dashing():
 		stretch *= Vector3(0.88, 0.92, 1.35) # drawn out along the dash
+	if _bounce_t < 1.2:
+		# Snapped back up out of the puddle: shoots up tall, then wobbles down to size
+		_bounce_t += delta
+		var b := exp(-_bounce_t * 6.0) * cos(_bounce_t * 22.0) * 0.45
+		stretch *= Vector3(1.0 - b * 0.5, 1.0 + b, 1.0 - b * 0.5)
 	_figure.visible = _sink < 0.95
 	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself), and
 	# flipping or twirling about its middle during a move
@@ -657,6 +676,23 @@ func _process(delta: float) -> void:
 		spray.rotation.y = heading
 		spray.emitting = running and foot_spots[f].y - global_position.y < 0.15 # only while it's down
 	var ground := global_position.y if is_on_floor() else NAN
+	# The puddles carried along under what made them (landing and dive alike)
+	var feet_now := _figure.feet()
+	for dab in _dabs:
+		var follow: int = dab.get_meta("follow", -1)
+		if dab.visible and follow >= 0:
+			var at: Vector3
+			match follow:
+				2: at = _figure.hand()
+				3: at = _figure.hand("L")
+				4: at = _figure.hand("R")
+				_: at = feet_now[mini(follow, feet_now.size() - 1)]
+			if at.y - global_position.y > 0.2:
+				# Lifted off the floor: its puddle goes
+				dab.set_meta("follow", -1)
+				dab.visible = false
+				continue
+			dab.global_position = Vector3(at.x, global_position.y + 0.01, at.z)
 	if melt > 0.5:
 		# A puddle smears one wide track along under its middle
 		# (laid from under the back of the puddle, so its front end never shows ahead of it)
@@ -665,18 +701,6 @@ func _process(delta: float) -> void:
 	else:
 		var contacts := _figure.feet()
 		var width := 0.16
-		# The landing puddles carried along under what made them
-		var feet_now := _figure.feet()
-		for dab in _dabs:
-			var follow: int = dab.get_meta("follow", -1)
-			if dab.visible and follow >= 0:
-				var at: Vector3 = _figure.hand() if follow == 2 else feet_now[mini(follow, feet_now.size() - 1)]
-				if at.y - global_position.y > 0.2:
-					# Lifted off the floor: its puddle goes
-					dab.set_meta("follow", -1)
-					dab.visible = false
-					continue
-				dab.global_position = Vector3(at.x, global_position.y + 0.01, at.z)
 		if _dab_hand > 0.0:
 			_dab_hand -= delta
 			if _dab_hand <= 0.0:
@@ -702,7 +726,7 @@ func _process(delta: float) -> void:
 
 	# The puddle: one long drop of metal skimming along, on a wobbly spring (it overshoots on the
 	# splat and as it gathers back up), stretched out the faster it goes
-	var pooled_target := (0.55 + 0.6 * smoothstep(0.0, 1.0, _sink)) if _puddled else 0.0 # small, then bigger as he sinks in
+	var pooled_target := 1.15 * smoothstep(0.0, 1.0, _sink) # only once he sinks in (before: the little puddles)
 	# (stepped in small fixed slices: a stiff spring blows up on a long frame otherwise)
 	var left := delta
 	while left > 0.0:
@@ -740,6 +764,33 @@ func _process(delta: float) -> void:
 
 
 ## Landing: a splash of metal particles thrown up from the feet and fanned out along the floor
+## The dive: a little puddle under each part of him that's down on the floor, following it
+func _slide_dabs() -> void:
+	var feet := _figure.feet()
+	for f in feet.size():
+		_dab(feet[f], f, 0.0, 0.55, Vector3.UP, 30.0)
+	for side in ["L", "R"]:
+		var hand := _figure.hand(side)
+		if hand.y - global_position.y < 0.35:
+			_dab(hand, 3 if side == "L" else 4, 0.0, 0.45, Vector3.UP, 30.0)
+	for part in _figure.parts():
+		if part.global_position.y - global_position.y < 0.45:
+			_dab(part.global_position, -1, 0.0, 0.5, Vector3.UP, 0.6)
+
+
+## Sinking in: the little puddles slide in together under him and go into the big one
+func _merge_slide_dabs() -> void:
+	var centre := global_transform * _pool_offset
+	for dab in _dabs:
+		if not dab.visible:
+			continue
+		dab.set_meta("follow", -1)
+		var merge := create_tween()
+		merge.tween_property(dab, "global_position", Vector3(centre.x, dab.global_position.y, centre.z), 0.18).set_ease(Tween.EASE_IN)
+		merge.parallel().tween_property(dab, "scale", dab.scale * 0.4, 0.18)
+		merge.tween_callback(func(): dab.visible = false)
+
+
 ## Jumping off: the puddles following the feet lift off as little balls that follow along
 func _lift_dabs() -> void:
 	for dab in _dabs:
@@ -773,6 +824,7 @@ func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := 
 	# Taken now (shown, too small to see), so another dab this frame doesn't take the same one
 	dab.visible = true
 	dab.set_meta("follow", follow)
+	dab.set_meta("slide", linger > 10.0)
 	dab.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * 0.001), spot)
 	var size := randf_range(0.5, 0.75) * size_scale
 	var tween := create_tween()

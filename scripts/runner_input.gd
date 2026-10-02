@@ -94,7 +94,22 @@ func _try_swipe(touch: Dictionary, pos: Vector2) -> void:
 	elif moved.y < 0.0:
 		jump.emit()
 	else:
+		touch.duck = true # (still down after the swipe: holding the duck)
 		duck.emit()
+
+
+## Duck held down: S / Down, B / D-pad down, or a finger left down after swiping down
+func duck_held() -> bool:
+	if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
+		return true
+	if use_pads:
+		for pad in Input.get_connected_joypads():
+			if Input.is_joy_button_pressed(pad, JOY_BUTTON_B) or Input.is_joy_button_pressed(pad, JOY_BUTTON_DPAD_DOWN):
+				return true
+	for touch in _touches.values():
+		if touch.get("duck", false):
+			return true
+	return false
 
 
 func _process(_delta: float) -> void:
