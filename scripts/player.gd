@@ -1,7 +1,7 @@
 extends CharacterBody3D
-## The liquid-metal blob. It runs forward on its own; the input steers it, and swipes
-## make it jump, sidestep or melt into a puddle to slide under things. Running head-on
-## into something splats it, and it pulls itself back together a moment earlier.
+## Mercury, the liquid-metal runner. It runs forward on its own; the input steers it, and
+## swipes make it jump, sidestep or melt into a puddle to slide under things. Running
+## head-on into something splats it, and it pulls itself back together a moment earlier.
 
 signal splatted
 signal drops_changed(total: int)
@@ -42,8 +42,11 @@ var _spawn := Transform3D.IDENTITY
 
 var _shape := CapsuleShape3D.new()
 var _collider := CollisionShape3D.new()
-var _blob := MeshInstance3D.new()
+var _blob := MeshInstance3D.new() # the puddle it melts into
 var _material := ShaderMaterial.new()
+var _figure := preload("res://scripts/mercury_model.gd").new()
+var _figure_material := ShaderMaterial.new()
+var _melt := 0.0 # 0 = Mercury standing, 1 = a puddle (ducking, or pulling back together)
 var _splash := CPUParticles3D.new()
 
 
@@ -62,7 +65,19 @@ func _ready() -> void:
 	_blob.mesh = sphere
 	_material.shader = preload("res://shaders/liquid_metal.gdshader")
 	_blob.material_override = _material
+	_blob.visible = false
 	add_child(_blob)
+
+	_figure_material.shader = _material.shader
+	_figure_material.set_shader_parameter("ripple", 0.35) # facets: only a shimmer
+	# Plain silver chrome, like the concept art (the puddle and splash too)
+	for material in [_figure_material, _material]:
+		material.set_shader_parameter("sky_top", Color(0.5, 0.53, 0.6))
+		material.set_shader_parameter("horizon", Color(1.0, 0.97, 0.97))
+		material.set_shader_parameter("ground", Color(0.16, 0.17, 0.2))
+		material.set_shader_parameter("grid_glow", Color(0.5, 0.55, 0.7))
+	_figure.material = _figure_material
+	add_child(_figure)
 
 	# Droplets thrown out by a splat
 	var drop := SphereMesh.new()
@@ -207,22 +222,32 @@ func _process(delta: float) -> void:
 	_squash = move_toward(_squash, 0.0, delta * 1.6)
 	_agitation = move_toward(_agitation, absf(steer) * 0.35, delta * 2.0)
 	_material.set_shader_parameter("agitation", _agitation)
+	_figure_material.set_shader_parameter("agitation", _agitation)
+	if dead:
+		return
 
-	# Shape: a tall drop running, a puddle ducking, stretched by vertical speed in the air
-	var target := Vector3(1.0, 1.1, 1.0)
-	if ducking:
-		target = Vector3(1.6, 0.36, 1.6)
-	elif not is_on_floor():
-		var s := clampf(velocity.y / 22.0, -0.3, 0.35)
-		target = Vector3(1.0 - s * 0.5, 1.0 + s, 1.0 - s * 0.5)
-	var scale_now := _blob.scale.lerp(target, 1.0 - exp(-delta * 14.0))
-	_blob.scale = scale_now
-	var squash := Vector3(1.0 + _squash * 0.6, 1.0 - _squash, 1.0 + _squash * 0.6)
-	_blob.scale = scale_now * squash
+	# Melts down fast (ducking has to be quick), pulls itself back up a little slower
+	_melt = move_toward(_melt, 1.0 if ducking else 0.0, delta * (8.0 if ducking else 3.5))
+	var melt := smoothstep(0.0, 1.0, _melt)
+
+	# Mercury: stretched by vertical speed in the air, squished on landing, flattening as it melts
+	var stretch := Vector3.ONE
+	if not is_on_floor():
+		var s := clampf(velocity.y / 30.0, -0.2, 0.25)
+		stretch = Vector3(1.0 - s * 0.5, 1.0 + s, 1.0 - s * 0.5)
+	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
+	_figure.scale = stretch.lerp(Vector3(1.6, 0.06, 1.6), melt)
+	_figure.visible = melt < 0.97
+	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself)
+	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
+	_figure.rotation = Vector3(0.0, heading, lean)
+	_figure.animate(delta, run_speed, not is_on_floor(), velocity.y, steer)
+
+	# The puddle swells as Mercury sinks into it
+	_blob.visible = melt > 0.03
+	_blob.scale = Vector3(1.7, 0.3, 1.7) * maxf(melt, 0.01)
 	_blob.position.y = BLOB_RADIUS * _blob.scale.y
-	# Faces the way it's going, leaning into turns and sidesteps
-	var lean := -steer * 0.22 - (_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
-	_blob.rotation = Vector3(-0.12, heading, lean)
+	_blob.rotation = Vector3(0.0, heading, lean)
 
 
 func _set_shape(size: Dictionary) -> void:
@@ -256,6 +281,7 @@ func _splat() -> void:
 	dead = true
 	velocity = Vector3.ZERO
 	_blob.visible = false
+	_figure.visible = false
 	_splash.restart()
 	splatted.emit()
 	var back := clampi(_history.size() - int(REWIND / 0.1), 0, _history.size())
@@ -281,6 +307,5 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	reset_physics_interpolation()
 	dead = false
 	# Pulls itself back together out of a puddle
-	_blob.visible = true
-	_blob.scale = Vector3(1.8, 0.05, 1.8)
+	_melt = 1.0
 	_agitation = 1.0

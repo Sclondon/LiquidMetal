@@ -1,6 +1,6 @@
 # Liquid Metal
 
-A 3D auto runner for the Scareathon arcade: you're a blob of liquid metal that runs on its own.
+A 3D auto runner for the Scareathon arcade: you are Mercury, a figure of liquid metal that runs on its own.
 
 | Do | Touch / mouse | Keys |
 | --- | --- | --- |
@@ -18,7 +18,8 @@ Hitting something head-on splats you; you pull back together about a second back
 - `test_area.gd` – 300 m walled grid floor. Practice lane straight ahead: hurdles (orange, jump),
   beams (cyan, duck), half walls (magenta, dodge). Around it: a pillar field, a cone slalom,
   a 30 m duck tunnel and kicker ramps. Mercury drops to collect (they come back).
-- `player.gd` – the blob (CharacterBody3D), its moves, splat and rewind.
+- `player.gd` – the runner (CharacterBody3D), its moves, splat and rewind; melts into a puddle to duck.
+- `mercury_model.gd` – Mercury, the character (after `mercury.png`): faceted chrome shards, run/jump poses.
 - `runner_input.gd` – swipe / hold / keyboard → signals and a turn axis.
 - `follow_cam.gd`, `hud.gd` (TUNE panel: speed, turn rate, jump height, camera).
 

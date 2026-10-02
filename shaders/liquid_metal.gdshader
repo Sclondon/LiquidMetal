@@ -5,6 +5,7 @@ shader_type spatial;
 // on every renderer, web included, not only where the sky's reflections are good.
 
 uniform float agitation : hint_range(0.0, 1.0) = 0.0;
+uniform float ripple = 1.0; // how much the surface moves (less on the faceted figure)
 uniform vec3 sky_top : source_color = vec3(0.1, 0.12, 0.3);
 uniform vec3 horizon : source_color = vec3(1.0, 0.62, 0.55);
 uniform vec3 ground : source_color = vec3(0.05, 0.06, 0.1);
@@ -13,9 +14,13 @@ uniform vec3 grid_glow : source_color = vec3(0.2, 0.45, 1.0);
 void vertex() {
 	float t = TIME * (3.0 + agitation * 6.0);
 	vec3 p = VERTEX * 5.0;
-	float ripple = sin(p.x + t) * sin(p.y * 1.2 + t * 1.3) * sin(p.z + t * 0.7);
-	ripple += 0.5 * sin(p.x * 2.1 - t * 1.7 + p.z * 1.4);
-	VERTEX += NORMAL * ripple * (0.018 + agitation * 0.06);
+	// A wobble field over space rather than along the normals, so faceted shapes (whose
+	// corners have a normal per face) move as one and don't crack open
+	vec3 wobble = vec3(
+		sin(p.y * 1.2 + t * 1.3) * sin(p.z + t * 0.7),
+		sin(p.x + t) * sin(p.z * 1.3 - t * 0.9),
+		sin(p.x * 2.1 - t * 1.7) * sin(p.y + t * 1.1));
+	VERTEX += wobble * ripple * (0.018 + agitation * 0.06);
 }
 
 void fragment() {
