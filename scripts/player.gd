@@ -40,7 +40,8 @@ var _dodge_dir := 0.0
 var _dash_left := 0.0
 var _drip_clock := 0.0
 var _slide_clock := 0.0 # how long it's been ducking
-var _liquid_hold := 0.0 # seconds more to stay as balls of liquid after a move
+var _liquid_hold := 0.0
+var _puddle_splash := 0.0 # the big puddle's ripple, kicked up as each part's puddle joins it # seconds more to stay as balls of liquid after a move
 var _duck_left := 0.0
 var _fast_fall := false
 var _was_on_floor := true
@@ -59,8 +60,6 @@ var _figure_material := ShaderMaterial.new()
 var _droplets := preload("res://scripts/droplets.gd").new()
 var _trail := preload("res://scripts/trail.gd").new()
 var _feet := CPUParticles3D.new() # metal splashing up at its feet as it runs
-var _trail_clock := 0.0
-var _trail_side := 1.0
 # A flip or twirl in progress: the axis (in Mercury's own frame), the turn, how long, how far in
 var _spin_axis := Vector3.RIGHT
 var _spin_turn := 0.0
@@ -124,6 +123,9 @@ func _ready() -> void:
 	add_child(_droplets)
 	_droplets.parts = _figure.parts()
 	_droplets.rejoined.connect(func(part): _figure.ripple(part, 0.7))
+	_figure.pooled.connect(func(): _puddle_splash = 1.0)
+	_material.set_shader_parameter("splash_up", true)
+	_material.set_shader_parameter("splash_strength", 0.5) # the puddle's squashed flat: ripple hard
 
 	_trail.material = _figure_material
 	add_child(_trail)
@@ -315,7 +317,8 @@ func _process(delta: float) -> void:
 	# A duck slides first, then melts
 	_slide_clock = _slide_clock + delta if ducking else 0.0
 	var puddle := ducking and _slide_clock > SLIDE_LEAD
-	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (8.0 if puddle else 3.5))
+	# (each part melts in turn, so this runs over ~0.4 s)
+	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (2.6 if puddle else 3.0))
 	var melt := smoothstep(0.0, 1.0, _melt)
 
 	# Mercury: stretched by vertical speed in the air, squished on landing, flattening as it melts
@@ -326,7 +329,7 @@ func _process(delta: float) -> void:
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
 	if is_dashing():
 		stretch *= Vector3(0.88, 0.92, 1.35) # drawn out along the dash
-	_figure.visible = melt < 0.97
+	_figure.visible = melt < 0.99
 	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself), and
 	# flipping or twirling about its middle during a move
 	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
@@ -336,7 +339,8 @@ func _process(delta: float) -> void:
 		spin = Basis(_spin_axis, _spin_turn * smoothstep(0.0, 1.0, 1.0 - _spin_left / _spin_time))
 	var turn := Basis(Vector3.UP, heading) * spin * Basis(Vector3.BACK, lean)
 	var middle := Vector3.UP * 0.9
-	_figure.transform = Transform3D(turn * Basis.from_scale(stretch.lerp(Vector3(1.6, 0.06, 1.6), melt)), middle - turn * middle)
+	_figure.transform = Transform3D(turn * Basis.from_scale(stretch.lerp(Vector3.ONE, melt)), middle - turn * middle)
+	_figure.set_puddle(_melt) # the parts melt into puddles one by one
 	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
@@ -349,20 +353,25 @@ func _process(delta: float) -> void:
 		_drip_clock = randf_range(0.15, 0.45)
 		_droplets.burst(randi_range(1, 2), 0.7)
 
-	# Splashing at its feet and a trail of puddles while it runs on the ground
+	# Splashing at its feet while it runs on the ground, and a track under each foot
 	var running := is_on_floor() and melt < 0.5 and not dead
 	_feet.emitting = running
 	_feet.rotation.y = heading
-	_trail_clock -= delta
-	if is_on_floor() and _trail_clock <= 0.0:
-		_trail_clock = 0.07
-		_trail_side = -_trail_side
-		var size := 0.45 if melt > 0.5 else 0.28 # the puddle leaves a wider smear
-		_trail.drop(global_position + right() * _trail_side * 0.15 * (1.0 - melt), heading, size)
+	var ground := global_position.y if is_on_floor() else NAN
+	if melt > 0.5:
+		# A puddle smears one wide track along under its middle
+		var under: Array[Vector3] = [global_position]
+		_trail.step(under, ground, 0.9, delta)
+	else:
+		_trail.step(_figure.feet(), ground, 0.16, delta)
 
 	# The puddle swells as Mercury sinks into it
-	_blob.visible = melt > 0.03
-	_blob.scale = Vector3(1.7, 0.3, 1.7) * maxf(melt, 0.01)
+	# (once the parts' puddles have slid in together)
+	var pooled := smoothstep(0.55, 1.0, _melt)
+	_blob.visible = pooled > 0.03
+	_puddle_splash = move_toward(_puddle_splash, 0.0, delta * 1.2)
+	_material.set_shader_parameter("splash", _puddle_splash)
+	_blob.scale = Vector3(1.7, 0.3, 1.7) * maxf(pooled, 0.01)
 	_blob.position.y = BLOB_RADIUS * _blob.scale.y
 	_blob.rotation = Vector3(0.0, heading, lean)
 
@@ -401,6 +410,7 @@ func _splat() -> void:
 	_figure.visible = false
 	_splash.restart()
 	_droplets.clear()
+	_trail.lift() # break the tracks where it splatted
 	_feet.emitting = false
 	_spin_left = 0.0
 	splatted.emit()

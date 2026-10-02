@@ -258,9 +258,11 @@ def run_keys():
     for frame24, shift_x, bank, bob in ((0, -0.12, -12, -0.55), (6, 0.0, 0, -0.1), (12, 0.12, 12, -0.55),
                                       (18, 0.0, 0, -0.1), (24, -0.12, -12, -0.55)):
         frame = round(frame24 * RUN_FRAMES / 24)  # laid out on a 24-frame cycle
-        key(hips, frame, ry=bank, x=shift_x, z=bob)
-        key(chest, frame, rx=-32, rz=-bank * 1.2)
-        key(head, frame, rx=36, ry=-bank * 0.6)  # head up against the lean, eyes on the track
+        # A speed skater's crouch: hips sunk low, chest folded right down over the legs, head
+        # tipped well back to keep looking down the track
+        key(hips, frame, ry=bank, x=shift_x, z=bob - 0.18)
+        key(chest, frame, rx=-58, rz=-bank * 1.2)
+        key(head, frame, rx=70, ry=-bank * 0.6)
     # The arms float on their own: bobbing once per push, a beat behind the body, swaying a little
     for frame in range(0, RUN_FRAMES + 1, 3):
         phase = 2 * math.pi * frame / RUN_FRAMES

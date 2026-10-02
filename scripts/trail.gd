@@ -1,65 +1,90 @@
-extends Node3D
-## The trail Mercury leaves: little flat puddles of metal left on the floor behind it as it runs,
-## shrinking away after a moment. World space (left where they fall). The player calls drop().
+extends MeshInstance3D
+## The two tracks Mercury's feet leave: a ribbon of liquid metal on the floor under each foot
+## for as long as it's down, broken when it lifts and started again where it lands, tapering
+## and fading away behind. World space. The player calls step() every frame.
 
-const MAX := 48
-const LIFE := 1.4 # seconds a puddle lasts
+const LIFE := 1.6 # seconds a bit of track lasts
+const STEP := 0.15 # metres between the points a track is laid along
+const CONTACT := 0.14 # a foot this close to the floor is touching it
 
 var material: Material
 
-var _live: Array[Dictionary] = []
-var _pool: Array[MeshInstance3D] = []
+var _strips: Array = [[], []] # per foot: strips, each an Array of { pos, age, width }
+var _down: Array[bool] = [false, false]
+var _mesh := ImmediateMesh.new()
 
 
 func _ready() -> void:
 	top_level = true
-	var disc := SphereMesh.new() # squashed flat into a puddle
-	disc.radius = 1.0
-	disc.height = 2.0
-	disc.radial_segments = 14
-	disc.rings = 5
-	for i in MAX:
-		var view := MeshInstance3D.new()
-		view.mesh = disc
-		view.material_override = material
-		view.visible = false
-		view.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		view.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
-		add_child(view)
-		_pool.append(view)
+	mesh = _mesh
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 
 
-## Leave a puddle at a spot on the floor, stretched along the way it was going
-func drop(at: Vector3, heading: float, size: float) -> void:
-	var view: MeshInstance3D
-	if _pool.is_empty():
-		# Out of puddles: reuse the oldest
-		view = _live.pop_front().view
-	else:
-		view = _pool.pop_back()
-	view.visible = true
-	view.global_position = Vector3(at.x, at.y + 0.01, at.z)
-	view.rotation = Vector3(0.0, heading + randf_range(-0.3, 0.3), 0.0)
-	_live.append({ view = view, age = 0.0, size = size * randf_range(0.7, 1.3) })
+## feet: where each foot is; floor: the height of the ground under them (NAN: in the air)
+func step(feet: Array[Vector3], floor: float, width: float, delta: float) -> void:
+	for f in mini(feet.size(), 2):
+		var foot := feet[f]
+		var touching := not is_nan(floor) and foot.y - floor < CONTACT
+		var strips: Array = _strips[f]
+		if touching:
+			var spot := Vector3(foot.x, floor + 0.012, foot.z)
+			if not _down[f]:
+				strips.append([]) # landed: a new piece of track
+			var strip: Array = strips.back()
+			if strip.size() < 2 or strip[strip.size() - 2].pos.distance_to(spot) > STEP:
+				strip.append({ pos = spot, age = 0.0, width = width })
+			else:
+				strip.back().pos = spot # the end of the track stays right under the foot
+		_down[f] = touching
+	_age(delta)
+	_draw()
+
+
+## Every foot off the ground: the next touch starts a fresh piece of track
+func lift() -> void:
+	_down = [false, false]
 
 
 func clear() -> void:
-	for puddle in _live:
-		puddle.view.visible = false
-		_pool.append(puddle.view)
-	_live.clear()
+	_strips = [[], []]
+	_down = [false, false]
+	_mesh.clear_surfaces()
 
 
-func _process(delta: float) -> void:
-	for i in range(_live.size() - 1, -1, -1):
-		var puddle: Dictionary = _live[i]
-		puddle.age += delta
-		var left: float = 1.0 - puddle.age / LIFE
-		if left <= 0.0:
-			puddle.view.visible = false
-			_pool.append(puddle.view)
-			_live.remove_at(i)
-			continue
-		# Spreads a touch at first, then shrinks away
-		var r: float = puddle.size * minf(puddle.age * 8.0 + 0.5, 1.0) * sqrt(left)
-		puddle.view.scale = Vector3(r * 0.8, r * 0.12, r * 1.4)
+func _age(delta: float) -> void:
+	for strips in _strips:
+		for i in range(strips.size() - 1, -1, -1):
+			var strip: Array = strips[i]
+			for point in strip:
+				point.age += delta
+			while not strip.is_empty() and strip[0].age > LIFE:
+				strip.pop_front()
+			if strip.is_empty() and i < strips.size() - 1:
+				strips.remove_at(i)
+
+
+func _draw() -> void:
+	_mesh.clear_surfaces()
+	for strips in _strips:
+		for strip in strips:
+			if strip.size() < 2:
+				continue
+			_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, material)
+			for i in strip.size():
+				var point: Dictionary = strip[i]
+				var before: Vector3 = strip[maxi(i - 1, 0)].pos
+				var after: Vector3 = strip[mini(i + 1, strip.size() - 1)].pos
+				var along := Vector3(after.x - before.x, 0.0, after.z - before.z)
+				if along.length_squared() < 1e-6:
+					along = Vector3.FORWARD
+				var side := along.normalized().cross(Vector3.UP)
+				# Narrows to nothing as it ages, and to a point at the very start
+				var fade: float = 1.0 - point.age / LIFE
+				var start := minf(float(i) / 2.0, 1.0)
+				var half: float = point.width * 0.5 * fade * (0.4 + 0.6 * start)
+				_mesh.surface_set_normal(Vector3.UP)
+				_mesh.surface_add_vertex(point.pos + side * half)
+				_mesh.surface_set_normal(Vector3.UP)
+				_mesh.surface_add_vertex(point.pos - side * half)
+			_mesh.surface_end()

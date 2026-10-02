@@ -13,6 +13,8 @@ uniform vec3 collapse_center = vec3(0.0);
 uniform float ball_radius = 0.2;
 // A ripple running out from collapse_center, 1 just after something joins the part, fading out
 uniform float splash = 0.0;
+uniform float splash_strength = 0.035;
+uniform bool splash_up = false; // ripple up and down (a puddle) instead of out from the centre
 uniform vec3 sky_top : source_color = vec3(0.1, 0.12, 0.3);
 uniform vec3 horizon : source_color = vec3(1.0, 0.62, 0.55);
 uniform vec3 ground : source_color = vec3(0.05, 0.06, 0.1);
@@ -27,7 +29,8 @@ void vertex() {
 		float d = length(out_from);
 		// Rings travelling outward, fading as they go (along the direction from the centre, so
 		// faceted shapes move as one and don't crack)
-		VERTEX += (d > 1e-4 ? out_from / d : vec3(0.0)) * sin(d * 38.0 - TIME * 26.0) * splash * 0.035 * exp(-d * 2.0);
+		vec3 push = splash_up ? vec3(0.0, 1.0, 0.0) : (d > 1e-4 ? out_from / d : vec3(0.0));
+		VERTEX += push * sin(d * 38.0 - TIME * 26.0) * splash * splash_strength * exp(-d * 2.0);
 	}
 	float t = TIME * (3.0 + agitation * 6.0);
 	vec3 p = VERTEX * 5.0;
