@@ -8,7 +8,7 @@
 # a point, with a guard rising above the knee). Faces +Y in Blender (= -Z in Godot).
 #
 # Animations (NLA tracks; each becomes one glTF animation across all the parts):
-#   run  - 36 frames at 30 fps, looping: long, snappy strides, each a deep lunge, body
+#   run  - 36 frames at 30 fps, looping: long, flowing strides, each a deep lunge, body
 #          banking over the front leg, leaning forward, arms trailing back ninja-run style
 #   land  - the superhero landing (one knee down, one hand on the floor), slammed into and held
 #   slide - drops into a slide (lead leg out, the other folded under, leaning back) and holds it
@@ -191,7 +191,7 @@ for s, tag in ((-1, "L"), (1, "R")):
     thigh = mesh_object(f"thigh_{tag}", bm, (s * 0.14, 0, -0.06), hips)
     bm = bmesh.new()
     add_shard(bm, [(-0.17, 0.3, 0.16), (0.0, 0.13, 0.11)], top=None, bottom=-SHIN)
-    add_shard(bm, [(-0.02, 0.28, 0.1)], top=0.36, bottom=-0.26, offset=(0, 0.11, 0))  # knee guard
+    add_shard(bm, [(-0.02, 0.28, 0.1)], top=0.62, bottom=-0.26, offset=(0, 0.12, 0))  # knee guard, reaching well up the thigh
     shin = mesh_object(f"shin_{tag}", bm, (0, 0, -THIGH), thigh)
     legs[tag] = (thigh, shin)
 
@@ -229,7 +229,7 @@ def ninja_arms(frame, sway=0.0, rx=8, bob=0.0):
     # Out to the sides, trailing back only a little (rx is on top of the chest's forward lean,
     # which already tips them back, so it's near zero); bob lifts them, floating
     for tag, (arm, s) in arms.items():
-        key(arm, frame, rx=rx + sway * s, ry=-s * 58, z=bob)  # -s: out, away from the body
+        key(arm, frame, rx=rx + sway * s, ry=-s * 30, z=bob)  # -s: out, away from the body
 
 
 def run_keys():
@@ -261,7 +261,7 @@ def run_keys():
         frame = round(frame24 * RUN_FRAMES / 24)  # laid out on a 24-frame cycle
         # A speed skater's crouch: hips sunk low, chest folded right down over the legs, head
         # tipped well back to keep looking down the track
-        key(hips, frame, ry=bank, x=shift_x, z=bob - 0.18)
+        key(hips, frame, ry=bank, x=shift_x, z=bob - 0.34)  # sitting low
         key(chest, frame, rx=-58, rz=-bank * 1.2)
         key(head, frame, rx=70, ry=-bank * 0.6)
     # The arms float on their own: bobbing once per push, a beat behind the body, swaying a little
@@ -351,6 +351,12 @@ def bake(track_name, keyer, interpolation):
                 # The arms' bob is keyed densely along a wave: smooth between those keys
                 point.interpolation = "SINE" if obj.name.startswith("arm_") and track_name == "run" else interpolation
                 point.easing = "EASE_IN_OUT"
+            if track_name == "run":
+                # A loop: cyclic curves, so the smooth (bezier) handles carry on round the seam
+                curve.modifiers.new("CYCLES")
+                for point in curve.keyframe_points:
+                    point.handle_left_type = point.handle_right_type = "AUTO"
+                curve.update()
         track = obj.animation_data.nla_tracks.new()
         track.name = track_name
         track.strips.new(track_name, int(action.frame_range[0]), action)
@@ -360,7 +366,7 @@ def bake(track_name, keyer, interpolation):
         obj.location, obj.rotation_euler = REST[obj.name][0].copy(), REST[obj.name][1].copy()
 
 
-bake("run", run_keys, "EXPO")  # snaps between the poses and holds them
+bake("run", run_keys, "BEZIER")  # flows on through each pose into the next (no holds)
 bake("jump", jump_keys, "QUART")
 bake("slide", slide_keys, "QUART")
 bake("land", land_keys, "QUART")

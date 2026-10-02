@@ -19,7 +19,7 @@ var _part_materials: Array[ShaderMaterial] = []
 var _balls: Array[MeshInstance3D] = []
 var _ball_radius: Array[float] = []
 var _ball_material := ShaderMaterial.new()
-var _liquid := 0.0 # 0 = shards, 1 = one gooey mass (jump, dash, dodge)
+var _liquid := 0.0 # 0 = firm, 1 = jelly (jump, dash, dodge)
 var _puddle := 0.0 # 0 = standing, 1 = every part melted flat on the floor (the slide's end)
 var _ball_home: Array[Vector3] = [] # where each ball sits on its part (the part's centre)
 var _ball_shape: Array[Basis] = [] # each ball's stretch from moving, worked out by _bounce
@@ -39,6 +39,7 @@ var _deform: Array[float] = []
 var _damping: Array[float] = []
 var _reach: Array[float] = [] # how far a part may swing from its pose
 var _springs_ready := false
+var _clock := 0.0
 var _splash: Array[float] = []
 # The tips of the shins (left, right): where the feet are
 var _feet: Array[MeshInstance3D] = []
@@ -124,14 +125,20 @@ func _ready() -> void:
 		_balls.append(ball)
 		_ball_radius.append(clampf(box.size.length() * 0.24, 0.1, 0.3))
 
-	# The order the slide melts them in: highest first
-	var heights: Array[float] = []
-	for jiggle in _jiggles:
-		heights.append((jiggle.global_transform * _ball_home[_jiggles.find(jiggle)]).y)
-	var low: float = heights.min()
-	var high: float = heights.max()
-	for h in heights:
-		_puddle_order.append(1.0 - (h - low) / maxf(high - low, 0.01))
+	# The order the slide melts them in (0 first .. 1 last): legs, then the body, then the head,
+	# and the arms plop in a beat behind
+	for part in _parts:
+		var name := String(part.name)
+		if name.begins_with("shin"):
+			_puddle_order.append(0.0)
+		elif name.begins_with("thigh"):
+			_puddle_order.append(0.12)
+		elif name.begins_with("chest"):
+			_puddle_order.append(0.38)
+		elif name.begins_with("head"):
+			_puddle_order.append(0.6)
+		else: # the arms
+			_puddle_order.append(1.0)
 
 	# The eyes go with the head's bouncing mesh
 	for eye in _eyes:
@@ -184,81 +191,94 @@ func set_puddle(amount: float) -> void:
 	_puddle = amount
 
 
-## Shards to liquid (1) and back (0), quickly; the player sets the target each frame, after
-## animate() and set_puddle()
+## Jelly (1) or firm (0): on a jump, dash or dodge every part keeps its shape but goes to jelly,
+## wobbling and squashing on softer springs. The player sets the target each frame, after
+## animate() and set_puddle().
 func set_liquid(target: float, delta: float) -> void:
-	# Melts over ~0.15 s, sets back into shards over ~0.25 s: slow enough to see it happen
 	var was := _liquid
-	_liquid = move_toward(_liquid, target, delta * (7.0 if target > _liquid else 4.0))
+	_liquid = move_toward(_liquid, target, delta * (8.0 if target > _liquid else 3.0))
 	if was > 0.5 and _liquid <= 0.5:
-		ripple_all() # the liquid running back into shards
+		ripple_all() # firming back up
 	_shape_balls()
 
 
+## The bounce of an elastic ease: shoots past 1 and wobbles back (0 -> 1)
+static func _elastic(x: float) -> float:
+	if x <= 0.0:
+		return 0.0
+	if x >= 1.0:
+		return 1.0
+	return pow(2.0, -9.0 * x) * sin((x * 9.0 - 0.75) * TAU / 3.0) + 1.0
+
+
 func _shape_balls() -> void:
-	var liquid := smoothstep(0.0, 1.0, _liquid)
+	var jelly := smoothstep(0.0, 1.0, _liquid)
 	var agitation: float = material.get_shader_parameter("agitation")
-	# The middle of the body, and the floor under it
 	var middle := global_transform * Vector3(0.0, 0.9, 0.0)
 	var floor := global_position
 	var size := global_basis.get_scale().x * MODEL_SCALE
-	var hide_eyes := liquid > 0.5
+	var hide_eyes := false
 	for i in _parts.size():
 		# The slide's melt goes part by part, head first: each has its own stretch of it
-		var start := _puddle_order[i] * 0.55
-		var p := clampf((_puddle - start) / 0.45, 0.0, 1.0)
-		# The shard swells and rounds off into a ball (for the jump's liquid, or as the first
-		# half of melting into a puddle)...
+		var start := _puddle_order[i] * 0.5
+		var p := clampf((_puddle - start) / 0.5, 0.0, 1.0)
 		if p > 0.95 and not _pooled[i]:
 			pooled.emit()
+			_splash[i] = 1.0
 		_pooled[i] = p > 0.95
-		var collapse := maxf(liquid, smoothstep(0.0, 0.5, p))
+		# The shard rounds off into a ball as it starts to melt...
+		var collapse := smoothstep(0.0, 0.45, p)
 		_part_materials[i].set_shader_parameter("collapse", collapse)
-		_part_materials[i].set_shader_parameter("agitation", maxf(agitation, collapse))
-		# ...while the true ball grows inside it, taking over once it's round
+		_part_materials[i].set_shader_parameter("agitation", maxf(agitation, maxf(collapse, jelly)))
+		_part_materials[i].set_shader_parameter("ripple", lerpf(0.35, 1.6, maxf(jelly, collapse)))
 		var ball := _balls[i]
 		ball.visible = collapse > 0.3
 		if not ball.visible:
 			continue
 		if p > 0.5:
 			hide_eyes = true
+		# ...drops to the floor with a splat (squashing past flat and wobbling back) and slides in
+		# under the middle to join the others
 		var home: Vector3 = _jiggles[i].global_transform * _ball_home[i]
 		var radius := _ball_radius[i] * size * clampf((collapse - 0.3) / 0.7, 0.0, 1.0)
-		# Jump, dash, dodge: the balls draw in to the middle and swell till they run together
-		# into one mass of liquid, every part stretched by how it's moving
-		var spot := home.lerp(middle, liquid * 0.7)
-		radius *= 1.0 + liquid * 0.7
+		var fall := smoothstep(0.25, 0.7, p)
+		var splat := _elastic(clampf((p - 0.45) / 0.55, 0.0, 1.0))
+		var spot := home.lerp(Vector3(lerpf(home.x, middle.x, 0.75), floor.y + radius * 0.3, lerpf(home.z, middle.z, 0.75)), fall)
+		var squash := Vector3(1.0 + splat * 0.9, 1.0 - splat * 0.72, 1.0 + splat * 0.9)
 		var shape := _ball_shape[i]
-		# The slide: down onto the floor, spread flat, and slid in under the middle to join up
-		var flat := smoothstep(0.35, 1.0, p)
-		if flat > 0.0:
-			var puddle_spot := Vector3(lerpf(home.x, middle.x, 0.75), floor.y + radius * 0.25, lerpf(home.z, middle.z, 0.75))
-			spot = spot.lerp(puddle_spot, flat)
-			var spread := Basis.from_scale(Vector3(1.0 + flat * 0.9, 1.0 - flat * 0.75, 1.0 + flat * 0.9))
-			shape = Basis(shape.x.lerp(spread.x, flat), shape.y.lerp(spread.y, flat), shape.z.lerp(spread.z, flat))
-		ball.global_transform = Transform3D(shape.scaled_local(Vector3.ONE * maxf(radius, 0.001)), spot)
+		shape = Basis(shape.x.lerp(Vector3.RIGHT, fall), shape.y.lerp(Vector3.UP, fall), shape.z.lerp(Vector3.BACK, fall))
+		ball.global_transform = Transform3D(shape * Basis.from_scale(squash * maxf(radius, 0.001)), spot)
 	for eye in _eyes:
 		eye.visible = not hide_eyes
 
 
-## Pose for this frame. speed: ground speed; airborne + vertical speed; steer -1..1; sliding:
+## Pose for this frame. speed: ground speed; effort: 0 at full speed .. 1 from a standstill (the
+## legs pump hard getting up to speed and stretch out long once there); airborne + vertical
+## speed; steer -1..1 (leaning into a turn, it glides rather than strides); sliding:
 ## dropping into a duck
-func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float, sliding := false, landing := false) -> void:
+func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float, sliding := false, landing := false, effort := 0.0) -> void:
 	var pose := "slide" if sliding else ("jump" if airborne else ("land" if landing else "run"))
 	if pose != _pose:
 		_pose = pose
 		_anim.play(pose, 0.04 if pose == "land" else BLEND) # slammed into
-	_anim.speed_scale = maxf(speed, 1.0) / RUN_PACE if pose == "run" else 1.0
+	if pose == "run":
+		# Long, slow strides at speed; quick hard pumps when getting up to it; easing right off to a
+		# glide while leaning into a turn
+		var rate := maxf(speed, 1.0) / RUN_PACE + effort * 1.4
+		_anim.speed_scale = rate * (1.0 - absf(steer) * 0.8)
+	else:
+		_anim.speed_scale = 1.0
 	for i in _splash.size():
 		_splash[i] = move_toward(_splash[i], 0.0, _delta * 1.6)
 		_part_materials[i].set_shader_parameter("splash", _splash[i])
-	_model.rotation.z = -steer * 0.25 # lean into turns
+	_model.rotation.z = -steer * 0.6 # leaning right into turns
 	_bounce(_delta)
 
 
 func _bounce(delta: float) -> void:
 	if delta <= 0.0:
 		return
+	_clock += delta
 	var root := global_position
 	if _springs_ready:
 		_root_velocity = (root - _last_root) / delta
@@ -279,13 +299,15 @@ func _bounce(delta: float) -> void:
 			continue
 		# A bouncy spring (well under critical damping) toward where the animation has the part,
 		# damped relative to the part's own velocity so running fast doesn't drag it behind
-		var k := _stiffness[i]
-		var damping := 2.0 * sqrt(k) * _damping[i]
+		var jelly := smoothstep(0.0, 1.0, _liquid)
+		var k := _stiffness[i] * (1.0 - jelly * 0.35) # jelly: softer
+		var damping := 2.0 * sqrt(k) * _damping[i] * (1.0 - jelly * 0.3)
 		var velocity := _spring_vel[i] + ((target - _spring_pos[i]) * k + (target_velocity - _spring_vel[i]) * damping) * delta
 		var spot := _spring_pos[i] + velocity * delta
 		var offset := spot - target
-		if offset.length() > _reach[i]:
-			offset = offset.normalized() * _reach[i]
+		var reach := _reach[i] * (1.0 + jelly * 0.3) # (not much more: it mustn't come apart)
+		if offset.length() > reach:
+			offset = offset.normalized() * reach
 			spot = target + offset
 		_spring_pos[i] = spot
 		_spring_vel[i] = velocity
@@ -298,8 +320,15 @@ func _bounce(delta: float) -> void:
 		# Into the part's own space (its scale included), so the mesh sits where the spring is
 		var local := part.global_basis.inverse() * offset
 		_jiggles[i].position = local
+		var shape := Vector3.ONE
 		if _deform[i] > 0.0:
 			# Legs: stretched when the spring hangs below the joint's path, squashed above it
 			var stretch := clampf(-local.y * _deform[i], -0.3, 0.35)
-			_jiggles[i].scale = Vector3(1.0 - stretch * 0.45, 1.0 + stretch, 1.0 - stretch * 0.45)
+			shape = Vector3(1.0 - stretch * 0.45, 1.0 + stretch, 1.0 - stretch * 0.45)
+		if jelly > 0.0:
+			# Jelly: every part wobbles, squashing one way as it bulges the other, each in its own time
+			var wob := sin(_clock * 17.0 + i * 1.7) * 0.22 * jelly
+			var wob2 := sin(_clock * 13.0 + i * 2.9) * 0.16 * jelly
+			shape *= Vector3(1.0 + wob, 1.0 - wob + wob2, 1.0 - wob2)
+		_jiggles[i].scale = shape
 	_springs_ready = true

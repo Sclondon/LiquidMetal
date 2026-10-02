@@ -60,7 +60,11 @@ var drops := 0
 var ducking := false
 var dead := false
 var rewind_on_splat := true # false (endless mode): a splat ends the run, no coming back
-var dash_cooldown := 0.0 # seconds until the next dash (the HUD's button shows it)
+var dash_cooldown := 0.0
+var speed := 0.0 # actual speed: builds up to run_speed (the legs pump hard getting there)
+const ACCELERATION := 9.0 # m/s per second
+var _pool_size := 0.0 # the puddle's size, on a wobbly spring
+var _pool_velocity := 0.0 # seconds until the next dash (the HUD's button shows it)
 
 var _dodge_left := 0.0
 var _dodge_dir := 0.0
@@ -91,7 +95,9 @@ const OWN_LAYER := 2
 var _probe := ReflectionProbe.new()
 var real_reflections := can_reflect()
 var _trail := preload("res://scripts/trail.gd").new()
-var _feet := CPUParticles3D.new() # metal splashing up at its feet as it runs
+# Metal splashing up at each foot while it's on the ground: carried along with Mercury (local
+# coordinates) and short-lived, so it stays at the feet instead of trailing off behind
+var _foot_splash: Array[CPUParticles3D] = []
 # A flip or twirl in progress: the axis (in Mercury's own frame), the turn, how long, how far in
 var _spin_axis := Vector3.RIGHT
 var _spin_turn := 0.0
@@ -177,22 +183,24 @@ func _ready() -> void:
 	splash.radial_segments = 6
 	splash.rings = 3
 	splash.material = _figure_material
-	_feet.mesh = splash
-	_feet.amount = 40
-	_feet.lifetime = 0.45
-	_feet.local_coords = false
-	_feet.emitting = false
-	_feet.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	_feet.emission_box_extents = Vector3(0.25, 0.02, 0.25)
-	_feet.direction = Vector3(0, 1, 0.6) # up and back (Mercury runs toward -Z)
-	_feet.spread = 35.0
-	_feet.initial_velocity_min = 2.0
-	_feet.initial_velocity_max = 4.5
-	_feet.gravity = Vector3(0, -GRAVITY * 0.7, 0)
-	_feet.scale_amount_min = 0.5
-	_feet.scale_amount_max = 1.4
-	_feet.position.y = 0.05
-	add_child(_feet)
+	for f in 2:
+		var spray := CPUParticles3D.new()
+		spray.mesh = splash
+		spray.amount = 14
+		spray.lifetime = 0.28
+		spray.local_coords = true
+		spray.emitting = false
+		spray.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+		spray.emission_sphere_radius = 0.08
+		spray.direction = Vector3(0, 1, 0.35)
+		spray.spread = 50.0
+		spray.initial_velocity_min = 1.2
+		spray.initial_velocity_max = 2.8
+		spray.gravity = Vector3(0, -GRAVITY * 0.6, 0)
+		spray.scale_amount_min = 0.4
+		spray.scale_amount_max = 1.1
+		add_child(spray)
+		_foot_splash.append(spray)
 
 	_land_spray.mesh = splash
 	_land_spray.amount = 44
@@ -397,11 +405,16 @@ func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= GRAVITY * (FAST_FALL if _fast_fall else 1.0) * delta
 	dash_cooldown = maxf(dash_cooldown - delta, 0.0)
-	var speed := run_speed
+	# Builds back up to running speed (sliding as a puddle and landing hard slow it)
+	if ducking and _melt > 0.5:
+		speed = move_toward(speed, run_speed * 0.75, ACCELERATION * delta)
+	else:
+		speed = move_toward(speed, run_speed, ACCELERATION * delta)
+	var going := speed
 	if _dash_left > 0.0:
-		speed *= DASH_BOOST
+		going *= DASH_BOOST
 		_dash_left -= delta
-	var ground := forward() * speed + right() * sideways
+	var ground := forward() * going + right() * sideways
 	velocity.x = ground.x
 	velocity.z = ground.z
 	move_and_slide()
@@ -428,6 +441,7 @@ func _physics_process(delta: float) -> void:
 	if on_floor and not _was_on_floor:
 		if _air_time > 0.35: # a real jump, not a bump: the superhero landing
 			_land_hold = LAND_HOLD
+			speed *= 0.6 # the landing costs speed: pump back up
 		_land_splat()
 		_squash = 0.3
 		_droplets.burst(5)
@@ -465,7 +479,7 @@ func _process(delta: float) -> void:
 	_slide_clock = _slide_clock + delta if ducking else 0.0
 	var puddle := ducking and _slide_clock > SLIDE_LEAD
 	# (each part melts in turn, so this runs over ~0.4 s)
-	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (2.6 if puddle else 3.0))
+	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (3.0 if puddle else 3.0))
 	var melt := smoothstep(0.0, 1.0, _melt)
 
 	# Mercury: stretched by vertical speed in the air, squished on landing, flattening as it melts
@@ -492,7 +506,7 @@ func _process(delta: float) -> void:
 		hop = sin(PI * (1.0 - _hop_left / HOP_TIME)) * HOP_HEIGHT
 	_figure.transform = Transform3D(turn * Basis.from_scale(stretch.lerp(Vector3.ONE, melt)), middle - turn * middle + Vector3.UP * hop)
 	_figure.set_puddle(_melt) # the parts melt into puddles one by one
-	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking, _land_hold > 0.0 and not ducking)
+	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
 	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
@@ -507,8 +521,13 @@ func _process(delta: float) -> void:
 
 	# Splashing at its feet while it runs on the ground, and a track under each foot
 	var running := is_on_floor() and melt < 0.5 and not dead
-	_feet.emitting = running
-	_feet.rotation.y = heading
+	var foot_spots := _figure.feet()
+	for f in mini(foot_spots.size(), _foot_splash.size()):
+		var spray := _foot_splash[f]
+		var at := to_local(foot_spots[f])
+		spray.position = Vector3(at.x, 0.05, at.z)
+		spray.rotation.y = heading
+		spray.emitting = running and foot_spots[f].y - global_position.y < 0.15 # only while it's down
 	var ground := global_position.y if is_on_floor() else NAN
 	if melt > 0.5:
 		# A puddle smears one wide track along under its middle
@@ -519,11 +538,16 @@ func _process(delta: float) -> void:
 
 	# The puddle swells as Mercury sinks into it
 	# (once the parts' puddles have slid in together)
-	var pooled := smoothstep(0.55, 1.0, _melt)
+	# The puddle swells on an underdamped spring: it overshoots and wobbles as it fills and empties
+	var pooled_target := smoothstep(0.55, 1.0, _melt)
+	_pool_velocity += ((pooled_target - _pool_size) * 260.0 - _pool_velocity * 9.0) * delta
+	_pool_size = maxf(_pool_size + _pool_velocity * delta, 0.0)
+	var pooled := _pool_size
+	var wobble := (_pool_size - pooled_target) * 1.8 # past full: thinner and wider; short: taller
 	_blob.visible = pooled > 0.03
 	_puddle_splash = move_toward(_puddle_splash, 0.0, delta * 1.2)
 	_material.set_shader_parameter("splash", _puddle_splash)
-	_blob.scale = Vector3(1.7, 0.3, 1.7) * maxf(pooled, 0.01)
+	_blob.scale = Vector3(1.7 * (1.0 + wobble * 0.5), 0.3 * (1.0 - wobble), 1.7 * (1.0 + wobble * 0.5)) * maxf(pooled, 0.01)
 	_blob.position.y = BLOB_RADIUS * _blob.scale.y
 	_blob.rotation = Vector3(0.0, heading, lean)
 
@@ -569,7 +593,8 @@ func _splat() -> void:
 	_splash.restart()
 	_droplets.clear()
 	_trail.lift() # break the tracks where it splatted
-	_feet.emitting = false
+	for spray in _foot_splash:
+		spray.emitting = false
 	_spin_left = 0.0
 	splatted.emit()
 	if not rewind_on_splat:
@@ -598,6 +623,7 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	dead = false
 	# Pulls itself back together out of a puddle
 	_melt = 1.0
+	speed = 0.0 # from a standstill: pumping hard
 	_dash_left = 0.0
 	dash_cooldown = 0.0
 	_droplets.clear()
