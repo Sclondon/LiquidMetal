@@ -7,8 +7,8 @@ extends Node3D
 signal rejoined(part: Node3D) # a blob merged back in
 
 const MAX := 32
-const FREE_TIME := 0.22 # seconds of free flight before the pull back starts
-const PULL := 70.0 # spring strength of the pull back
+const FREE_TIME := 0.45 # seconds of free flight before the pull back starts
+const PULL := 28.0 # spring strength of the pull back
 const GRAVITY := 22.0
 
 var material: Material
@@ -45,7 +45,7 @@ func burst(count: int, strength := 1.0) -> void:
 			return
 		var part: Node3D = parts[randi() % parts.size()]
 		var offset := Vector3(randf_range(-0.12, 0.12), randf_range(-0.12, 0.12), randf_range(-0.12, 0.12))
-		var fling := Vector3(randf_range(-2.5, 2.5), randf_range(1.5, 4.0), randf_range(-1.0, 1.0))
+		var fling := Vector3(randf_range(-4.0, 4.0), randf_range(2.0, 5.5), randf_range(-1.5, 1.5))
 		# Thrown back against the run a little, so they trail behind before catching up
 		fling -= source.forward() * randf_range(1.0, 3.0)
 		var view: MeshInstance3D = _pool.pop_back()
@@ -80,7 +80,7 @@ func _process(delta: float) -> void:
 			# Pulled home, harder the longer it's been out; damped so it doesn't orbit
 			var pull: float = PULL * (1.0 + (drop.age - FREE_TIME) * 4.0)
 			velocity += (home - view.global_position) * pull * delta
-			velocity = velocity.lerp(source.velocity, 1.0 - exp(-delta * 9.0))
+			velocity = velocity.lerp(source.velocity, 1.0 - exp(-delta * 4.0))
 		drop.velocity = velocity
 		view.global_position += velocity * delta
 		# Stretched along its motion, like a drop of liquid
@@ -90,7 +90,7 @@ func _process(delta: float) -> void:
 		var stretch := clampf(relative.length() * 0.08, 0.0, 1.2)
 		view.scale = Vector3(1.0, 1.0, 1.0 + stretch) * drop.size
 		# Rejoined: close enough (or out too long), it merges back in
-		if (drop.age > FREE_TIME and view.global_position.distance_to(home) < 0.12) or drop.age > 1.4:
+		if (drop.age > FREE_TIME and view.global_position.distance_to(home) < 0.12) or drop.age > 2.2:
 			rejoined.emit(drop.part)
 			view.visible = false
 			_pool.append(view)

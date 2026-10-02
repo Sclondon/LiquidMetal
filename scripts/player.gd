@@ -24,7 +24,10 @@ var _wall_lost := 0.0 # seconds without touching the wall (a short grace before 
 var _wall_cooldown := 0.0
 var _wall_roll := 0.0 # the figure turned onto its side, smoothed
 var _wall_tween: Tween # the puddle splatted against something
-var _arm_puddles: Array[MeshInstance3D] = [] # the arms, splatting a beat after the body
+var _arm_puddles: Array[MeshInstance3D] = []
+var _dabs: Array[MeshInstance3D] = [] # little puddles left at the landing's contact points
+var _support := 0.0 # the hand down on a sharp turn, smoothed
+var _dab_hand := 0.0 # seconds till the landing hand's puddle # the arms, splatting a beat after the body
 var _since_dodge := 99.0 # seconds since a dodge began (and which way: _dodge_dir)
 const JUMP_BUFFER := 0.2 # seconds a jump pressed in the air is kept for the landing
 # The slide: a quick hop, then SPLAT, the whole figure squashed flat into one puddle that skims
@@ -521,6 +524,10 @@ func _physics_process(delta: float) -> void:
 		if _air_time > 0.35: # a real jump, not a bump: the superhero landing
 			_land_hold = LAND_HOLD
 			_figure.land_side = "R" if randf() < 0.5 else "L"
+			# Little puddles where it touches down: both feet, then the hand
+			for foot in _figure.feet():
+				_dab(foot)
+			_dab_hand = 0.12
 			speed *= 0.6 # the landing costs speed: pump back up
 		_land_splat()
 		_squash = 0.3
@@ -632,6 +639,19 @@ func _process(delta: float) -> void:
 	else:
 		var contacts := _figure.feet()
 		var width := 0.16
+		if _dab_hand > 0.0:
+			_dab_hand -= delta
+			if _dab_hand <= 0.0:
+				_dab(_figure.hand())
+		# A sharp turn at speed: the inside hand down on the floor, holding it up
+		var sharp := absf(steer) > 0.85 and is_on_floor() and speed > 8.0 and _land_hold <= 0.0 and not ducking
+		_support = move_toward(_support, 1.0 if sharp else 0.0, delta * 5.0)
+		_figure.turn_support = _support
+		if _support > 0.6:
+			var hand := _figure.hand("R" if steer > 0.0 else "L")
+			contacts.append(Vector3(hand.x, global_position.y, hand.z))
+			for c in contacts.size():
+				contacts[c].y = global_position.y
 		if _land_hold > LAND_HOLD - LAND_PLANTED and is_on_floor():
 			# The superhero landing: both feet and the hand planted, three tracks dragged along the
 			# floor (pinned down: in the pose they hover just off it, which would break them up)
@@ -672,6 +692,38 @@ func _process(delta: float) -> void:
 
 
 ## Landing: a splash of metal particles thrown up from the feet and fanned out along the floor
+## A little puddle left on the floor at a spot (the superhero landing's feet and hand)
+func _dab(at: Vector3, delay := 0.0) -> void:
+	var dab: MeshInstance3D = null
+	for d in _dabs:
+		if not d.visible:
+			dab = d
+			break
+	if dab == null:
+		dab = MeshInstance3D.new()
+		dab.mesh = _blob.mesh
+		dab.material_override = _material
+		dab.top_level = true
+		dab.visible = false
+		add_child(dab)
+		_dabs.append(dab)
+	var spot := Vector3(at.x, global_position.y + 0.01, at.z)
+	# Taken now (shown, too small to see), so another dab this frame doesn't take the same one
+	dab.visible = true
+	dab.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * 0.001), spot)
+	var size := randf_range(0.5, 0.75)
+	var tween := create_tween()
+	if delay > 0.0:
+		tween.tween_interval(delay)
+	tween.tween_callback(func():
+		dab.global_transform = Transform3D(Basis(Vector3.UP, randf() * TAU).scaled_local(Vector3(0.05, 0.02, 0.05)), spot)
+	)
+	tween.tween_property(dab, "scale", Vector3(size, 0.08, size * randf_range(0.8, 1.3)), 0.25).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	tween.tween_interval(0.5)
+	tween.tween_property(dab, "scale", Vector3(0.01, 0.01, 0.01), 0.6).set_ease(Tween.EASE_IN)
+	tween.tween_callback(func(): dab.visible = false)
+
+
 func _land_splat() -> void:
 	_land_spray.restart()
 	_land_skid.restart()

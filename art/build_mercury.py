@@ -165,7 +165,7 @@ chest = mesh_object("chest", bm, (0, 0, 0.17), hips)
 # point: the spike, raked back.
 bm = bmesh.new()
 add_lathe(bm, [(-0.08, 0.13), (0.0, 0.17), (0.09, 0.16), (0.2, 0.11), (0.36, 0.06)], top=0.82, bottom=-0.15)
-bmesh.ops.rotate(bm, verts=bm.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-38), 3, "X"))
+bmesh.ops.rotate(bm, verts=bm.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(14), 3, "X"))  # tipped back
 head = mesh_object("head", bm, (0, 0, 0.7), chest)
 for s in (-1, 1):
     bm = bmesh.new()

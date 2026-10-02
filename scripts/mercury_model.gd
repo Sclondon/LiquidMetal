@@ -49,6 +49,8 @@ var _springs_ready := false
 var _clock := 0.0
 var _head_jiggle: Node3D
 var _arm_pump := 0.0
+## 0..1: the inside hand reaching down to the floor on a sharp turn (the player sets it)
+var turn_support := 0.0
 var _turn_sign := 0.0 # which way it last turned
 var _switch_step := 0.0 # seconds left of stepping across after turning the other way
 var _splash: Array[float] = []
@@ -186,8 +188,8 @@ func feet() -> Array[Vector3]:
 
 
 ## Where the landing hand's tip is, in the world
-func hand() -> Vector3:
-	var arm: Node3D = _hands.get(land_side)
+func hand(side := "") -> Vector3:
+	var arm: Node3D = _hands.get(side if side != "" else land_side)
 	return arm.global_transform * _hand_tip if arm else global_position
 
 
@@ -340,7 +342,10 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 	for side in _hands:
 		var arm: Node3D = _hands[side]
 		var swing := stride * (1.0 if side == "L" else -1.0) # the left arm forward on the right lunge
-		arm.rotation = Vector3(swing * 1.0 * _arm_pump, 0.0, 0.0)
+		var out := 0.0
+		if (side == "R") == (steer > 0.0): # the inside arm on a turn: down and out to the floor
+			out = steer * 0.65 * turn_support
+		arm.rotation = Vector3(swing * 1.0 * _arm_pump * (1.0 - turn_support) + 0.5 * absf(out), 0.0, out)
 	_bounce(_delta)
 
 
