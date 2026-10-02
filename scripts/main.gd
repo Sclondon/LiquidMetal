@@ -20,6 +20,8 @@ const ENDLESS_FAST := 3000.0
 @export var start_mode := "menu"
 ## False: gamepads ignored (screenshot tests on a machine with a controller plugged in)
 @export var use_pads := true
+## False: no enemy runners (tests that need a clear lane)
+@export var enemies := true
 var mode := ""
 
 var area: Node3D
@@ -119,6 +121,7 @@ func start_endless() -> void:
 	mode = "endless"
 	var course := Endless.new()
 	course.runner = player
+	course.with_enemies = enemies
 	_use_course(course)
 	player.rewind_on_splat = false
 	player.run_speed = ENDLESS_SPEED.x

@@ -21,6 +21,12 @@ const DODGE_COLOR := Color(1.0, 0.2, 0.75)
 const WALL_COLOR := Color(0.45, 0.5, 0.6)
 const WALL_RUN_COLOR := Color(0.2, 1.0, 0.45) # the tall walls made for running on
 const BoostPad := preload("res://scripts/boost_pad.gd")
+const Runner := preload("res://scripts/player.gd")
+const AiInput := preload("res://scripts/ai_input.gd")
+
+## Enemy runners on the lane (main turns them off for some tests)
+var with_enemies := true
+var enemies: Array = []
 
 var start_position := Vector3(0.0, 0.0, 0.0)
 var start_heading := 0.0
@@ -58,6 +64,10 @@ func generate(seed := 0) -> void:
 		_rng.randomize()
 	else:
 		_rng.seed = seed
+	for enemy in enemies:
+		if is_instance_valid(enemy):
+			enemy.queue_free()
+	enemies.clear()
 	_built_to = start_position.z + 20.0
 	_next_obstacle = start_position.z - RUNWAY
 	_last_kind = ""
@@ -70,11 +80,24 @@ func distance() -> float:
 
 
 func _physics_process(_delta: float) -> void:
+	if runner and with_enemies and distance() > 60.0 and enemies.size() < 3 and _rng.randf() < _delta * 0.25:
+		_spawn_enemy(runner.global_position.z - _rng.randf_range(70.0, 120.0))
 	if runner == null:
 		return
 	_extend()
 	# The floor goes along with the runner (its grid is drawn in world space, so it doesn't slide)
 	_floor.global_position.z = snappedf(runner.global_position.z, 20.0)
+	# Enemies: gone once well behind (or a while after blowing up); a new one now and then ahead
+	for i in range(enemies.size() - 1, -1, -1):
+		var enemy = enemies[i]
+		if not is_instance_valid(enemy) or enemy.global_position.z > runner.global_position.z + BEHIND or (enemy.dead and enemy.get_meta("dead_for", 0.0) > 4.0):
+			if is_instance_valid(enemy):
+				enemy.queue_free()
+			enemies.remove_at(i)
+		elif enemy.dead:
+			enemy.set_meta("dead_for", enemy.get_meta("dead_for", 0.0) + _delta)
+		else:
+			enemy.run_speed = runner.run_speed * 0.62
 	# Clear what's well behind
 	while not _chunks.is_empty() and _chunks[0].end > runner.global_position.z + BEHIND:
 		_chunks.pop_front().node.queue_free()
@@ -128,6 +151,22 @@ func _build_chunk(from: float, to: float) -> void:
 ## Half the distance between a hurdle pair's hurdles at this point in the run
 func _pair_half(z: float) -> float:
 	return lerpf(6.0, 9.5, clampf((start_position.z - z) / HARD_AT, 0.0, 1.0))
+
+
+## An enemy runner: the player's own runner with an AI at the controls
+func _spawn_enemy(z: float) -> void:
+	var ai := AiInput.new()
+	ai.course = self
+	var enemy := Runner.new()
+	enemy.input = ai
+	enemy.add_child(ai)
+	add_child(enemy)
+	ai.body = enemy
+	enemy.make_enemy()
+	enemy.place(Vector3(_rng.randf_range(-2.0, 2.0), 0.0, z), 0.0)
+	enemy.run_speed = runner.run_speed * 0.62 if runner else 9.0
+	enemy.speed = enemy.run_speed
+	enemies.append(enemy)
 
 
 func _obstacle(node: Node3D, kind: String, z: float) -> void:

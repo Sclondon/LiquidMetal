@@ -4,6 +4,9 @@ A 3D auto runner for the Scareathon arcade: you are Mercury, a figure of liquid 
 
 The menu has two modes: **ENDLESS RUN** (a lane that never ends and speeds up the further you get; one splat
 ends the run; your best distance is saved) and **TEST AREA** (the playground; a splat rewinds you a moment).
+Red enemy runners (the same runner, AI-driven) share the endless lane: dash through them to blow them up
+(+3 drops); run into one without dashing and you splat. Dashes punch left, right, then a two-handed clap.
+
 Esc (or TUNE → Menu, or Start on a gamepad) goes back to the menu.
 
 Gamepad: left stick turn, right stick look around, A / D-pad up jump, B / D-pad down duck, X dash,
@@ -12,7 +15,7 @@ LB / RB (or D-pad left / right) dodge.
 | Do | Touch / mouse | Keys |
 | --- | --- | --- |
 | Turn | tap and hold the left / right half of the screen | A / D (held) |
-| Jump (a front flip) | swipe up | Space, W, Up |
+| Jump (a flip; again in the air for a double jump) | swipe up | Space, W, Up |
 | Duck (melt into a puddle) | swipe down (in the air: dive, then puddle) | S, Down |
 | Dodge (sidestep 4.5 m, with a barrel roll) | swipe left / right | Left / Right arrows |
 | Wall run (in the air, touch a wall: jump, then dodge into it; jump again to kick off) | | |

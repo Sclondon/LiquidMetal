@@ -19,6 +19,7 @@ var total_splats := 0
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
 	main.start_mode = "test"
+	main.enemies = false
 	root.add_child(main)
 
 

@@ -8,6 +8,8 @@ const GOAL := 1500.0 # metres
 var main: Node
 var done := {}
 var splatted := false
+var blown := 0
+var seen := {}
 
 
 func _initialize() -> void:
@@ -42,9 +44,21 @@ func _process(_delta: float) -> bool:
 			if absf(o.z - player.global_position.z) < 30.0:
 				print("  nearby: %s at z %.1f (runner at z %.1f)" % [o.kind, o.z, player.global_position.z])
 	if splatted or main.area.distance() >= GOAL or Time.get_ticks_msec() > 150000:
-		print("ENDLESS BOT: %.0f m, speed %.1f, %s" % [main.area.distance(), player.run_speed, "splatted" if splatted else "no splats"])
+		print("ENDLESS BOT: %.0f m, speed %.1f, %s, enemies blown up %d" % [main.area.distance(), player.run_speed, "splatted" if splatted else "no splats", blown])
 		return true
-	var pace: float = maxf(player.speed, player.run_speed) / 14.0
+	# An enemy ahead in its line: dash through it (the punch launches 0.3 s after the press)
+	for enemy in main.area.enemies:
+		if not is_instance_valid(enemy) or enemy.dead:
+			continue
+		var gap: float = player.global_position.z - enemy.global_position.z
+		var closing: float = maxf(player.speed - enemy.speed, 1.0)
+		if gap > 0.0 and gap < closing * 0.45 + 2.5 and absf(enemy.global_position.x - player.global_position.x) < 1.4 and player.dash_cooldown <= 0.0:
+			player.input.dash.emit()
+	for enemy in main.area.enemies:
+		if is_instance_valid(enemy) and enemy.dead and not seen.has(enemy):
+			seen[enemy] = true
+			blown += 1
+	var pace: float = maxf(Vector2(player.velocity.x, player.velocity.z).length(), player.run_speed) / 14.0
 	var z := player.global_position.z
 	var plan: Array = main.area.lane_plan
 	for k in plan.size():

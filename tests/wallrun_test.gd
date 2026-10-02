@@ -14,6 +14,7 @@ var log := []
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
 	main.start_mode = "endless"
+	main.enemies = false
 	root.add_child(main)
 
 

@@ -53,6 +53,9 @@ var _kick_left := 0.0 # a dash kicking off: one quick switch of legs
 var _kick_rate := 0.0 # how fast the kick's two steps play
 var _cock := 0.0
 var _punch := 0.0
+var _punch_with := "both" # "L", "R" or "both" (the clap)
+var _ext := 0.0 # how far out the punching arm is stretched, on a springy, overshooting spring
+var _ext_v := 0.0
 var _stretch: Array[float] = []
 var _reach_fix: Array[float] = []
 var _arm_length := 1.0 # an arm blade's length in the model (from its mesh)
@@ -237,9 +240,15 @@ func kick(time: float) -> void:
 
 
 ## The dash's punch: cock 0..1 the right arm drawn back, punch 0..1 thrown forward and stretched
-func set_punch(cock: float, punch: float) -> void:
+func set_punch(cock: float, punch: float, with := "both") -> void:
 	_cock = cock
 	_punch = punch
+	_punch_with = with
+
+
+## Whether an arm ("L" / "R") is the one punching (both, for the clap)
+func _punching(side: String) -> bool:
+	return _punch_with == "both" or _punch_with == side
 
 
 ## Set a liquid-metal shader setting on every part, ball and the base material
@@ -400,7 +409,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		if (side == "R") == (steer > 0.0): # the inside arm on a turn: down and out to the floor
 			out = steer * 0.65 * turn_support
 		var turn := Vector3(swing * 1.0 * _arm_pump * (1.0 - turn_support) + 0.5 * absf(out), 0.0, out)
-		if _cock > 0.0 or _punch > 0.0:
+		if (_cock > 0.0 or _punch > 0.0) and _punching(side):
 			# Charging: both arms spread wide and swept back behind him (further the longer it's held);
 			# the launch claps them together out in front (aimed dead ahead in _bounce)
 			var out_sign := 1.0 if side == "R" else -1.0
@@ -413,7 +422,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			_turned[index] = turn
 		if index >= 0:
 			# Punching, the arm draws out long and thin, sagging a little, like a Dali clock
-			_stretch[index] = 1.0 + 2.2 * _punch # (both arms, grown long and pointing)
+			_stretch[index] = 1.0 # (the punch's stretch is worked out in _bounce)
 	_bounce(_delta)
 
 
@@ -421,6 +430,11 @@ func _bounce(delta: float) -> void:
 	if delta <= 0.0:
 		return
 	delta = minf(delta, 1.0 / 30.0) # a long frame would throw the springs out
+	# The punching arm's stretch: snapping out past full length and wobbling back, like elastic
+	var step := delta / 4.0
+	for k in 4:
+		_ext_v += ((_punch - _ext) * 260.0 - _ext_v * 7.0) * step
+		_ext += _ext_v * step
 	_clock += delta
 	var root := global_position
 	if _springs_ready:
@@ -477,7 +491,7 @@ func _bounce(delta: float) -> void:
 			var thin := 1.0 / sqrt(_stretch[i])
 			shape *= Vector3(thin, _stretch[i], thin)
 		var turned := Basis.from_euler(_turned[i])
-		if _punch > 0.0 and _hands.values().has(_jiggles[i]):
+		if _punch > 0.0 and _hands.values().has(_jiggles[i]) and _punching(_hands.find_key(_jiggles[i])):
 			# The punch: aimed dead ahead, whatever the body's doing (the blade hangs along -y)
 			var ahead: Vector3 = (get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z
 			# Both hands meet at one point out ahead: each arm aimed at it, and stretched to reach it
@@ -485,22 +499,24 @@ func _bounce(delta: float) -> void:
 			for arm in _hands.values():
 				middle += (arm as Node3D).get_parent().global_position
 			middle /= maxf(_hands.size(), 1)
-			var meet := middle + ahead.normalized() * 1.9
+			var meet := middle + ahead.normalized() * 3.0
+			if _punch_with != "both":
+				meet = _parts[i].global_position + ahead.normalized() * 3.4
 			var to_meet := meet - _parts[i].global_position
 			var y := -to_meet.normalized()
 			# (corrected each frame by how far the tip actually got: it converges onto the point)
 			var tip_now: Vector3 = _jiggles[i].global_transform * _hand_tip
 			var got := (tip_now - _parts[i].global_position).length()
-			if got > 0.05 and _punch > 0.5:
+			if got > 0.05 and _punch > 0.95 and absf(_ext_v) < 0.5:
 				_reach_fix[i] = clampf(_reach_fix[i] * to_meet.length() / got, 0.3, 4.0)
 			var arm_reach := to_meet.length() / maxf(_arm_length * global_basis.get_scale().x, 0.01) * _reach_fix[i]
-			var thin := 1.0 / sqrt(lerpf(1.0, arm_reach, _punch))
-			shape = shape / Vector3(1.0 / sqrt(_stretch[i]), _stretch[i], 1.0 / sqrt(_stretch[i])) * Vector3(thin, lerpf(1.0, arm_reach, _punch), thin)
+			var thin := 1.0 / sqrt(maxf(lerpf(1.0, arm_reach, _ext), 0.3))
+			shape = shape / Vector3(1.0 / sqrt(_stretch[i]), _stretch[i], 1.0 / sqrt(_stretch[i])) * Vector3(thin, maxf(lerpf(1.0, arm_reach, _ext), 0.3), thin)
 			var x := y.cross(Vector3.UP).normalized()
 			var aimed := Basis(x, y, x.cross(y))
 			var aim_local := (_parts[i].global_basis.orthonormalized().inverse() * aimed).orthonormalized()
 			turned = Basis(Quaternion(turned.orthonormalized()).slerp(Quaternion(aim_local), _punch))
-		if _cock > 0.0 and _punch < 1.0 and _hands.values().has(_jiggles[i]):
+		if _cock > 0.0 and _punch < 1.0 and _hands.values().has(_jiggles[i]) and _punching(_hands.find_key(_jiggles[i])):
 			# Winding up: both arms swept back behind him, a little out to the sides at first, then
 			# drawn further and further back and up the longer it's held
 			var fwd: Vector3 = (get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z

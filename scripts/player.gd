@@ -123,8 +123,11 @@ var _pool_offset := Vector3.ZERO # where the puddle sits under him
 var _look_clock := 0.0
 var _bounce_t := 9.0
 var _dash_kick := 0.0
+const PUNCHES := ["L", "R", "both"] # each dash in turn: left, right, then the clap
+var _punch_index := 2
 var _punch := 0.0
-var _floor_y := 0.0 # the floor's height, last time he was on it
+var _floor_y := 0.0
+var _exploded := false # blown up: its blobs splat anywhere as little puddles # the floor's height, last time he was on it
 var _charging := false # the dash held down: winding up the punch
 var _charge := 0.0 # 0 .. 1 how wound up
 var _dash_power := 1.0
@@ -155,6 +158,7 @@ var _spin_left := 0.0
 var _last_trick := {}
 var _hop_left := 0.0
 var _jump_buffer := 0.0
+var _air_jumps := 1 # a double jump: one more jump in the air
 # The splat on landing: particles of metal thrown up and out from the feet, and skittering along the floor
 var _land_spray := CPUParticles3D.new()
 var _land_skid := CPUParticles3D.new()
@@ -414,7 +418,20 @@ func _on_jump() -> void:
 		_trick("jump", 1.0, 0.6)
 		return
 	if not is_on_floor():
-		_jump_buffer = JUMP_BUFFER # pressed just before landing: jump as it touches down
+		# In the air: just above the ground, it's kept for the landing; higher up, a double jump
+		var ray := PhysicsRayQueryParameters3D.create(global_position, global_position + Vector3.DOWN * 0.9)
+		ray.exclude = [get_rid()]
+		var near_ground := not get_world_3d().direct_space_state.intersect_ray(ray).is_empty() and velocity.y < 0.0
+		if _air_jumps > 0 and not near_ground:
+			_air_jumps -= 1
+			velocity.y = sqrt(2.0 * GRAVITY * jump_height * 0.8)
+			_fast_fall = false
+			_squash = -0.25
+			_agitation = 1.0
+			_droplets.burst(4, 1.0)
+			_trick("jump", 1.0, 0.55)
+		else:
+			_jump_buffer = JUMP_BUFFER # pressed just before landing: jump as it touches down
 		return
 	_set_ducking(false)
 	if ducking:
@@ -493,6 +510,44 @@ func _launch_punch() -> void:
 	_charge = 0.0
 
 
+## An enemy runner: the same runner, tinted blood red, driven by an AI; one crash and it's gone
+var is_enemy := false
+
+func make_enemy() -> void:
+	is_enemy = true
+	rewind_on_splat = false
+	for target in [_figure_material, _material]:
+		target.set_shader_parameter("sky_top", Color(0.25, 0.02, 0.04))
+		target.set_shader_parameter("horizon", Color(1.0, 0.25, 0.15))
+		target.set_shader_parameter("ground", Color(0.08, 0.02, 0.02))
+		target.set_shader_parameter("grid_glow", Color(1.0, 0.2, 0.1))
+	_figure.set_shader("sky_top", Color(0.25, 0.02, 0.04))
+	_figure.set_shader("horizon", Color(1.0, 0.25, 0.15))
+	_figure.set_shader("ground", Color(0.08, 0.02, 0.02))
+	_figure.set_shader("grid_glow", Color(1.0, 0.2, 0.1))
+
+
+## Dashed through: bursts into blobs of liquid metal flung on with the hit
+func blow_up(push: Vector3) -> void:
+	if dead:
+		return
+	_last_velocity = push * 0.8 + velocity * 0.3
+	_exploded = true
+	dead = true
+	velocity = Vector3.ZERO
+	_figure.visible = false
+	_blob.visible = false
+	_crash_burst(global_position, Vector3.ZERO)
+	_splash.restart()
+	_droplets.clear()
+	_trail.lift()
+	for spray in _foot_splash:
+		spray.emitting = false
+	collision_layer = 0
+	collision_mask = 0
+	splatted.emit()
+
+
 func is_dashing() -> bool:
 	return _dash_left > 0.0
 
@@ -505,6 +560,7 @@ func _on_dash() -> void:
 	_agitation = 1.0
 	# The dash is a punch: two quick steps while the right arm cocks back, then it punches
 	# forward and the punch launches him, the arm stretching out long (see the kick's end below)
+	_punch_index = (_punch_index + 1) % PUNCHES.size()
 	_dash_kick = DASH_KICK
 	_figure.kick(DASH_KICK)
 	dashed.emit()
@@ -549,6 +605,15 @@ func _physics_process(delta: float) -> void:
 	for i in get_slide_collision_count():
 		var hit := get_slide_collision(i)
 		var normal := hit.get_normal()
+		var other := hit.get_collider()
+		if other != null and other != self and other.has_method("blow_up") and not other.dead:
+			if is_dashing() or _dash_kick > 0.0 or _charging:
+				# Dashed (or about to) straight through: it bursts apart
+				other.blow_up(velocity)
+				drops += 3
+				drops_changed.emit(drops)
+				_droplets.burst(4, 1.2)
+				continue
 		if normal.y < 0.5 and normal.dot(forward()) < -0.6:
 			_splat(hit.get_position(), normal, hit.get_collider())
 			return
@@ -579,6 +644,8 @@ func _physics_process(delta: float) -> void:
 		return
 
 	var on_floor := is_on_floor()
+	if on_floor or wall_running:
+		_air_jumps = 1
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	if on_floor and not _was_on_floor and _jump_buffer > 0.0:
 		_jump_buffer = 0.0
@@ -735,7 +802,7 @@ func _process(delta: float) -> void:
 	# then springing back
 	var cock := 1.0 - _dash_kick / DASH_KICK if _dash_kick > 0.0 else (1.0 + _charge * 0.5 if _charging else 0.0)
 	_punch = move_toward(_punch, 1.0 if is_dashing() else 0.0, delta * (14.0 if is_dashing() else 4.0))
-	_figure.set_punch(cock, _punch)
+	_figure.set_punch(cock, _punch, PUNCHES[_punch_index])
 	var liquid := (not is_on_floor() and not wall_running) or _liquid_hold > 0.0
 	_figure.set_liquid(1.0 if liquid else 0.0, delta)
 
@@ -948,6 +1015,8 @@ func _look_around(delta: float) -> void:
 ## that drop to the floor join the floor's puddles
 func _crash_burst(point: Vector3, normal: Vector3, collider: Object = null) -> void:
 	var flat := Vector3(normal.x, 0.0, normal.z).normalized()
+	if flat == Vector3.ZERO:
+		flat = -forward()
 	var across := flat.cross(Vector3.UP).normalized()
 	_wall_surface.global_transform = Transform3D(Basis(across, flat, across.cross(flat)), point + flat * 0.01)
 	_wall_surface.visible = true
@@ -983,7 +1052,8 @@ func _crash_burst(point: Vector3, normal: Vector3, collider: Object = null) -> v
 		add_child(view)
 		var radius := randf_range(0.09, 0.2)
 		view.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * radius), at - flat * 0.3)
-		var fling := _last_velocity * randf_range(0.6, 1.05) + Vector3(randf_range(-2.0, 2.0), randf_range(-0.5, 2.5), randf_range(-2.0, 2.0))
+		var spread := 6.0 if _exploded else 2.0
+		var fling := _last_velocity * randf_range(0.6, 1.05) + Vector3(randf_range(-spread, spread), randf_range(-0.5, 2.5 + spread * 0.5), randf_range(-spread, spread))
 		_crash_balls.append({ view = view, velocity = fling, radius = radius })
 
 
@@ -1009,7 +1079,9 @@ func _update_crash(delta: float) -> void:
 		# Splat
 		var n: Vector3 = hit.normal
 		var r: float = ball.radius * randf_range(2.2, 3.2)
-		if absf(n.y) < 0.6:
+		if absf(n.y) < 0.6 and _exploded:
+			_dab(hit.position, -1, 0.0, r * 1.2, n, 2.5)
+		elif absf(n.y) < 0.6:
 			# Shrunk until it fits on what it hit (no overhang off a fence's edge)
 			var flat := Vector3(n.x, 0.0, n.z).normalized()
 			var side := flat.cross(Vector3.UP).normalized()
@@ -1215,6 +1287,9 @@ func _splat(point := Vector3.INF, normal := Vector3.ZERO, collider: Object = nul
 	if normal == Vector3.ZERO:
 		_blob.visible = false
 		_splash.restart()
+	elif is_enemy:
+		_exploded = true
+		_crash_burst(point, normal, collider)
 	else:
 		_crash_burst(point, normal, collider)
 	_droplets.clear()
