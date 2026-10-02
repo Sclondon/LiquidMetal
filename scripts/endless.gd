@@ -155,6 +155,19 @@ func _pair_half(z: float) -> float:
 
 ## An enemy runner: the player's own runner with an AI at the controls
 func _spawn_enemy(z: float) -> void:
+	# Never on top of an obstacle: nudged on until it's 8 m clear of them all
+	for tries in 12:
+		var clear := true
+		for o in lane_plan:
+			var half: float = 6.0 if o.kind == "hurdle_pair" else 0.0
+			if absf(z - o.z) < 8.0 + half:
+				clear = false
+		for other in enemies:
+			if is_instance_valid(other) and absf(other.global_position.z - z) < 12.0:
+				clear = false
+		if clear:
+			break
+		z -= 6.0
 	var ai := AiInput.new()
 	ai.course = self
 	var enemy := Runner.new()

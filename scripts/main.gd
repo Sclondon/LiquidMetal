@@ -110,7 +110,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## The test area: the playground, splats rewind you
 func start_test() -> void:
 	mode = "test"
-	_use_course(TestArea.new())
+	var course := TestArea.new()
+	course.runner = player
+	course.with_enemies = enemies
+	_use_course(course)
 	player.rewind_on_splat = true
 	player.run_speed = ENDLESS_SPEED.x
 	_play()

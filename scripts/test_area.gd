@@ -27,6 +27,13 @@ var lane_plan: Array = []
 
 var _materials := {}
 var _course: Node3D # everything generate() builds, thrown away on the next one
+
+## Red enemy runners on the practice lane (the same runner, AI-driven), a few at a time
+const Runner := preload("res://scripts/player.gd")
+const AiInput := preload("res://scripts/ai_input.gd")
+var runner: CharacterBody3D
+var with_enemies := true
+var enemies: Array = []
 var _rng := RandomNumberGenerator.new()
 var _drops: Array[Area3D] = []
 var _drop_mesh := SphereMesh.new()
@@ -49,6 +56,10 @@ func _ready() -> void:
 func generate(seed := 0) -> void:
 	if _course:
 		_course.queue_free()
+	for enemy in enemies:
+		if is_instance_valid(enemy):
+			enemy.queue_free()
+	enemies.clear()
 	_course = Node3D.new()
 	add_child(_course)
 	_drops.clear()
@@ -64,6 +75,55 @@ func generate(seed := 0) -> void:
 	_build_ramps()
 	_build_wall_alley(Vector3(54.0, 0.0, 40.0))
 	_build_boost_pads()
+
+
+func _physics_process(delta: float) -> void:
+	if runner == null or not with_enemies:
+		return
+	for i in range(enemies.size() - 1, -1, -1):
+		var enemy = enemies[i]
+		var gone: bool = not is_instance_valid(enemy) or enemy.global_position.z < LANE_END - 15.0 or enemy.global_position.z > runner.global_position.z + 40.0
+		if not gone and enemy.dead:
+			enemy.set_meta("dead_for", enemy.get_meta("dead_for", 0.0) + delta)
+			gone = enemy.get_meta("dead_for") > 4.0
+		if gone:
+			if is_instance_valid(enemy):
+				enemy.queue_free()
+			enemies.remove_at(i)
+		elif not enemy.dead:
+			enemy.run_speed = runner.run_speed * 0.62
+	# Keep three on the lane ahead of him while he's on it
+	var z := runner.global_position.z
+	if enemies.size() < 3 and absf(runner.global_position.x) < LANE_WIDTH and z > LANE_END + 40.0:
+		_spawn_enemy(maxf(z - randf_range(25.0, 60.0), LANE_END + 10.0))
+
+
+func _spawn_enemy(z: float) -> void:
+	# Never on top of an obstacle: nudged on until it's 8 m clear of them all
+	for tries in 12:
+		var clear := true
+		for o in lane_plan:
+			var half: float = 6.0 if o.kind == "hurdle_pair" else 0.0
+			if absf(z - o.z) < 8.0 + half:
+				clear = false
+		for other in enemies:
+			if is_instance_valid(other) and absf(other.global_position.z - z) < 12.0:
+				clear = false
+		if clear:
+			break
+		z -= 6.0
+	var ai := AiInput.new()
+	ai.course = self
+	var enemy := Runner.new()
+	enemy.input = ai
+	enemy.add_child(ai)
+	add_child(enemy)
+	ai.body = enemy
+	enemy.make_enemy()
+	enemy.place(Vector3(randf_range(-1.5, 1.5), 0.0, z), 0.0)
+	enemy.run_speed = runner.run_speed * 0.62
+	enemy.speed = enemy.run_speed
+	enemies.append(enemy)
 
 
 func _process(_delta: float) -> void:

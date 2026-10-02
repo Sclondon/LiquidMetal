@@ -171,6 +171,7 @@ var _splash := CPUParticles3D.new()
 
 
 func _ready() -> void:
+	collision_mask = 1 | 2 # the world, and enemy runners
 	floor_snap_length = 0.35
 	floor_max_angle = deg_to_rad(50.0)
 	_collider.shape = _shape
@@ -515,6 +516,9 @@ var is_enemy := false
 
 func make_enemy() -> void:
 	is_enemy = true
+	# Enemies are on their own layer: they don't hit each other (nor take drops or boosts)
+	collision_layer = 2
+	collision_mask = 1
 	rewind_on_splat = false
 	for target in [_figure_material, _material]:
 		target.set_shader_parameter("sky_top", Color(0.25, 0.02, 0.04))

@@ -38,9 +38,10 @@ func _physics_process(_delta: float) -> void:
 	for k in course.lane_plan.size():
 		var obstacle: Dictionary = course.lane_plan[k]
 		var oz: float = obstacle.z
-		if oz > z + 2.0 or oz < z - 40.0:
-			continue
 		var half: float = obstacle.get("half", 6.0)
+		# (a pair reaches half on past its middle)
+		if oz - (half if obstacle.kind == "hurdle_pair" else 0.0) > z + 2.0 or oz < z - 40.0:
+			continue
 		var actions := []
 		match obstacle.kind:
 			"hurdle":
