@@ -82,7 +82,7 @@ func _physics_process(delta: float) -> void:
 		return
 	for i in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[i]
-		var gone: bool = not is_instance_valid(enemy) or enemy.global_position.z < LANE_END - 15.0 or enemy.global_position.z > runner.global_position.z + 40.0
+		var gone: bool = not is_instance_valid(enemy) or enemy.global_position.distance_to(runner.global_position) > 80.0
 		if not gone and enemy.dead:
 			enemy.set_meta("dead_for", enemy.get_meta("dead_for", 0.0) + delta)
 			gone = enemy.get_meta("dead_for") > 4.0
@@ -90,43 +90,55 @@ func _physics_process(delta: float) -> void:
 			if is_instance_valid(enemy):
 				enemy.queue_free()
 			enemies.remove_at(i)
-	# Keep three on the lane ahead of him while he's on it
-	var z := runner.global_position.z
-	if enemies.size() < 2 and absf(runner.global_position.x) < LANE_WIDTH and z > LANE_END + 40.0 and z < start_position.z + 5.0:
-		_spawn_enemy(minf(z + randf_range(22.0, 34.0), HALF - 10.0)) # behind him: they chase
+	# Two after him at a time, wherever he goes in the arena (a moment between them)
+	_spawn_clock -= delta
+	if enemies.size() < 2 and _spawn_clock <= 0.0 and not runner.dead:
+		_spawn_clock = 1.5
+		_spawn_enemy()
 
 
-func _spawn_enemy(z: float) -> void:
-	# Never on top of an obstacle: nudged on until it's 8 m clear of them all
-	for tries in 12:
-		var clear := true
-		for o in lane_plan:
-			var half: float = 6.0 if o.kind == "hurdle_pair" else 0.0
-			if absf(z - o.z) < 8.0 + half:
-				clear = false
+var _spawn_clock := 1.0
+
+
+## An enemy 22-34 m behind him, facing his way, somewhere clear (in the arena, off obstacles,
+## and not on top of another enemy)
+func _spawn_enemy() -> void:
+	var space := get_world_3d().direct_space_state
+	var probe := SphereShape3D.new()
+	probe.radius = 0.8 # (centred 1.2 m up: clear of the floor)
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = probe
+	query.collision_mask = 1 | 2
+	query.exclude = [runner.get_rid()]
+	for tries in 10:
+		var back: Vector3 = -runner.forward() * randf_range(22.0, 34.0) + runner.right() * randf_range(-3.0, 3.0)
+		var spot: Vector3 = runner.global_position + back
+		spot.y = 0.0
+		if absf(spot.x) > HALF - 6.0 or absf(spot.z) > HALF - 6.0:
+			continue
+		query.transform = Transform3D(Basis.IDENTITY, spot + Vector3.UP * 1.2)
+		if not space.intersect_shape(query, 1).is_empty():
+			continue
+		var crowded := false
 		for other in enemies:
-			if is_instance_valid(other) and absf(other.global_position.z - z) < 12.0:
-				clear = false
-		if clear:
-			break
-		z += 6.0 # (further back: they spawn behind him)
-	if runner and z - runner.global_position.z < 15.0:
-		return # (never right on top of him)
-	if z > HALF - 5.0:
+			if is_instance_valid(other) and other.global_position.distance_to(spot) < 8.0:
+				crowded = true
+		if crowded:
+			continue
+		var ai := AiInput.new()
+		ai.course = self
+		ai.target = runner
+		var enemy := Runner.new()
+		enemy.input = ai
+		enemy.add_child(ai)
+		add_child(enemy)
+		ai.body = enemy
+		enemy.make_enemy()
+		enemy.place(spot, runner.heading)
+		enemy.run_speed = runner.run_speed * 1.35
+		enemy.speed = enemy.run_speed
+		enemies.append(enemy)
 		return
-	var ai := AiInput.new()
-	ai.course = self
-	ai.target = runner
-	var enemy := Runner.new()
-	enemy.input = ai
-	enemy.add_child(ai)
-	add_child(enemy)
-	ai.body = enemy
-	enemy.make_enemy()
-	enemy.place(Vector3(randf_range(-1.5, 1.5), 0.0, z), 0.0)
-	enemy.run_speed = runner.run_speed * 1.35 if runner else 9.0
-	enemy.speed = enemy.run_speed
-	enemies.append(enemy)
 
 
 func _process(_delta: float) -> void:
