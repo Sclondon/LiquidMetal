@@ -3,10 +3,11 @@ render_mode cull_disabled;
 // All of Mercury's puddles on the floor drawn as one liquid surface: each puddle is a disc, and
 // the discs melt together with a smooth union, so neighbours flow into each other like a fluid
 // rather than overlapping. The surface swells up from its edges and catches the light like the
-// rest of him (the same painted dusk reflected in it). Drawn on a flat plane on the floor.
+// rest of him (the same painted dusk reflected in it). Drawn on a flat plane (PlaneMesh), on
+// the floor or turned to lie on a wall; blob centres are in the plane's own x / z.
 
 const int MAX_BLOBS = 32;
-uniform vec4 blobs[MAX_BLOBS]; // xy: centre (world x, z), z: unused, w: radius
+uniform vec4 blobs[MAX_BLOBS]; // xy: centre (the plane's local x, z), z: unused, w: radius
 uniform int count = 0;
 uniform float smoothing = 0.32; // how far apart two puddles still reach for each other
 uniform float swell = 0.22; // how far in from the edge it takes to reach full height
@@ -15,10 +16,10 @@ uniform vec3 horizon : source_color = vec3(1.0, 0.62, 0.55);
 uniform vec3 ground : source_color = vec3(0.05, 0.06, 0.1);
 uniform vec3 grid_glow : source_color = vec3(0.2, 0.45, 1.0);
 
-varying vec3 world_pos;
+varying vec2 plane_pos;
 
 void vertex() {
-	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	plane_pos = VERTEX.xz;
 }
 
 float field(vec2 p) {
@@ -37,7 +38,7 @@ float field(vec2 p) {
 }
 
 void fragment() {
-	vec2 p = world_pos.xz;
+	vec2 p = plane_pos;
 	float d = field(p);
 	if (d > 0.0) {
 		discard;
@@ -46,7 +47,7 @@ void fragment() {
 	float e = 0.02;
 	vec2 g = vec2(field(p + vec2(e, 0.0)) - d, field(p + vec2(0.0, e)) - d) / e;
 	float rim = 1.0 - clamp(-d / swell, 0.0, 1.0);
-	vec3 n = normalize(vec3(g.x * rim * 2.2, 1.0, g.y * rim * 2.2));
+	vec3 n = normalize((MODEL_MATRIX * vec4(normalize(vec3(g.x * rim * 2.2, 1.0, g.y * rim * 2.2)), 0.0)).xyz);
 	NORMAL = normalize((VIEW_MATRIX * vec4(n, 0.0)).xyz);
 
 	vec3 view_world = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
