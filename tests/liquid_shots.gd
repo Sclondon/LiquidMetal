@@ -14,6 +14,7 @@ var taken := 0
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
 	main.start_mode = "test"
+	main.use_pads = false # (a controller plugged into this machine would steer)
 	root.add_child(main)
 
 

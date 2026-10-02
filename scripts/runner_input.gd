@@ -14,6 +14,9 @@ const STICK_DEADZONE := 0.2
 ## The right stick, -1..1 each way: the chase camera looks around with it
 var look := Vector2.ZERO
 
+## False: gamepads ignored (the screenshot tests, on a machine with a controller plugged in)
+var use_pads := true
+
 var _centred := {} # "device:axis" -> true once that axis has been seen at rest
 
 signal jump
@@ -109,7 +112,7 @@ func _process(_delta: float) -> void:
 		keys += 1.0
 	var stick := 0.0
 	look = Vector2.ZERO
-	for pad in Input.get_connected_joypads():
+	for pad in (Input.get_connected_joypads() if use_pads else []):
 		stick += _axis(pad, JOY_AXIS_LEFT_X)
 		look += Vector2(_axis(pad, JOY_AXIS_RIGHT_X), _axis(pad, JOY_AXIS_RIGHT_Y))
 	turn = clampf(held + keys + stick, -1.0, 1.0)

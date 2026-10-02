@@ -81,8 +81,17 @@ func _process(delta: float) -> void:
 			var pull: float = PULL * (1.0 + (drop.age - FREE_TIME) * 4.0)
 			velocity += (home - view.global_position) * pull * delta
 			velocity = velocity.lerp(source.velocity, 1.0 - exp(-delta * 4.0))
+		# Moved, but not through anything: off a wall or the floor it skids and bounces a little
+		var to: Vector3 = view.global_position + velocity * delta
+		var ray := PhysicsRayQueryParameters3D.create(view.global_position, to)
+		ray.exclude = [source.get_rid()]
+		var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+		if not hit.is_empty():
+			var normal: Vector3 = hit.normal
+			to = hit.position + normal * 0.04
+			velocity = velocity.slide(normal) * 0.6 + normal * maxf(-velocity.dot(normal), 0.0) * 0.25
 		drop.velocity = velocity
-		view.global_position += velocity * delta
+		view.global_position = to
 		# Stretched along its motion, like a drop of liquid
 		var relative := velocity - source.velocity
 		if relative.length_squared() > 0.01:

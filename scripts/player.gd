@@ -525,8 +525,9 @@ func _physics_process(delta: float) -> void:
 			_land_hold = LAND_HOLD
 			_figure.land_side = "R" if randf() < 0.5 else "L"
 			# Little puddles where it touches down: both feet, then the hand
-			for foot in _figure.feet():
-				_dab(foot)
+			var feet := _figure.feet()
+			for f in feet.size():
+				_dab(feet[f], f)
 			_dab_hand = 0.12
 			speed *= 0.6 # the landing costs speed: pump back up
 		_land_splat()
@@ -639,10 +640,17 @@ func _process(delta: float) -> void:
 	else:
 		var contacts := _figure.feet()
 		var width := 0.16
+		# The landing puddles carried along under what made them
+		var feet_now := _figure.feet()
+		for dab in _dabs:
+			var follow: int = dab.get_meta("follow", -1)
+			if dab.visible and follow >= 0:
+				var at: Vector3 = _figure.hand() if follow == 2 else feet_now[mini(follow, feet_now.size() - 1)]
+				dab.global_position = Vector3(at.x, global_position.y + 0.01, at.z)
 		if _dab_hand > 0.0:
 			_dab_hand -= delta
 			if _dab_hand <= 0.0:
-				_dab(_figure.hand())
+				_dab(_figure.hand(), 2)
 		# A sharp turn at speed: the inside hand down on the floor, holding it up
 		var sharp := absf(steer) > 0.85 and is_on_floor() and speed > 8.0 and _land_hold <= 0.0 and not ducking
 		_support = move_toward(_support, 1.0 if sharp else 0.0, delta * 5.0)
@@ -692,8 +700,9 @@ func _process(delta: float) -> void:
 
 
 ## Landing: a splash of metal particles thrown up from the feet and fanned out along the floor
-## A little puddle left on the floor at a spot (the superhero landing's feet and hand)
-func _dab(at: Vector3, delay := 0.0) -> void:
+## A little puddle on the floor under a contact point of the superhero landing (follow: 0 / 1 the
+## left / right foot, 2 the hand), carried along under it as it slides
+func _dab(at: Vector3, follow := -1, delay := 0.0) -> void:
 	var dab: MeshInstance3D = null
 	for d in _dabs:
 		if not d.visible:
@@ -710,6 +719,7 @@ func _dab(at: Vector3, delay := 0.0) -> void:
 	var spot := Vector3(at.x, global_position.y + 0.01, at.z)
 	# Taken now (shown, too small to see), so another dab this frame doesn't take the same one
 	dab.visible = true
+	dab.set_meta("follow", follow)
 	dab.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * 0.001), spot)
 	var size := randf_range(0.5, 0.75)
 	var tween := create_tween()
@@ -833,9 +843,21 @@ func _wall_puddle(point: Vector3, normal: Vector3) -> void:
 		var delay := randf_range(0.06, 0.2) + i * randf_range(0.04, 0.25)
 		var size := randf_range(0.75, 1.3)
 		var drip := randf_range(0.15, 0.9)
+		# The arm itself flies off the body into the wall and turns into the splat where it lands
+		var flyer := MeshInstance3D.new()
+		var from: Node3D = _figure.arm_mesh("L" if side * across.x < 0.0 else "R")
+		if from == null:
+			from = _figure.arm_mesh("L" if i == 0 else "R")
+		flyer.mesh = from.mesh
+		flyer.material_override = _figure_material
+		flyer.top_level = true
+		add_child(flyer)
+		flyer.global_transform = from.global_transform
 		var splat := create_tween()
-		splat.tween_interval(delay)
+		splat.tween_property(flyer, "global_position", spot, delay).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		splat.parallel().tween_property(flyer, "scale", flyer.scale * Vector3(1.3, 0.6, 1.3), delay)
 		splat.tween_callback(func():
+			flyer.queue_free()
 			arm.visible = true
 			_droplets.burst(randi_range(1, 4), randf_range(0.4, 0.9))
 		)

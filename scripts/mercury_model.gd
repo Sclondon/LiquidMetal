@@ -52,6 +52,7 @@ var _arm_pump := 0.0
 ## 0..1: the inside hand reaching down to the floor on a sharp turn (the player sets it)
 var turn_support := 0.0
 var _turn_sign := 0.0 # which way it last turned
+var _straight_for := 0.0
 var _switch_step := 0.0 # seconds left of stepping across after turning the other way
 var _splash: Array[float] = []
 # The tips of the shins (left, right): where the feet are
@@ -187,6 +188,11 @@ func feet() -> Array[Vector3]:
 	return spots
 
 
+## An arm's mesh ("L" / "R") as it is right now (the crash flings copies of them at the wall)
+func arm_mesh(side: String) -> MeshInstance3D:
+	return _hands.get(side)
+
+
 ## Where the landing hand's tip is, in the world
 func hand(side := "") -> Vector3:
 	var arm: Node3D = _hands.get(side if side != "" else land_side)
@@ -308,6 +314,12 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			if _turn_sign != 0.0 and signf(steer) != _turn_sign:
 				_switch_step = 0.35
 			_turn_sign = signf(steer)
+			_straight_for = 0.0
+		else:
+			# Run straight a moment and the last turn's forgotten: the next one isn't a switch
+			_straight_for += _delta
+			if _straight_for > 0.25:
+				_turn_sign = 0.0
 		var fast := clampf((speed - 4.0) / (TOP_SPEED - 4.0), 0.0, 1.0) * (1.0 - effort * 0.5)
 		var hold := lerpf(HOLD_SLOW, HOLD_FAST, fast)
 		# Near a standstill the legs pump much faster, working up to speed

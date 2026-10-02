@@ -6,13 +6,14 @@ var main: Node
 var t := 0.0
 var crashed := -1.0
 var cam_spot := Vector3.ZERO
-var times := [0.0, 0.1, 0.2, 0.3, 0.5, 0.9]
+var times := [0.0, 0.05, 0.1, 0.15, 0.25, 0.5]
 var taken := 0
 
 
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
 	main.start_mode = "endless"
+	main.use_pads = false # (a controller plugged into this machine would steer)
 	root.add_child(main)
 
 
@@ -20,15 +21,13 @@ func _process(delta: float) -> bool:
 	t += delta
 	var p: CharacterBody3D = main.player
 	var cam: Camera3D = main.cam
-	if crashed < 0.0 and t > 1.0:
-		p.input.turn = 1.0 # steer into the right-hand wall
 	if crashed < 0.0:
 		if p.dead:
 			crashed = t
 			cam.target = null
 			cam_spot = p.global_position
 	else:
-		cam.global_position = cam_spot + Vector3(-2.2, 1.2, 2.4)
+		cam.global_position = cam_spot + Vector3(-1.2, 1.6, 4.2)
 		cam.look_at(cam_spot + Vector3(0.0, 0.7, -0.6))
 		cam.fov = 55.0
 		if taken < times.size() and t - crashed >= times[taken]:

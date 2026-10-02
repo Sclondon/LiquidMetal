@@ -18,6 +18,8 @@ const ENDLESS_FAST := 3000.0
 
 ## Where it opens: "menu", or straight into "test" or "endless" (the tests use these)
 @export var start_mode := "menu"
+## False: gamepads ignored (screenshot tests on a machine with a controller plugged in)
+@export var use_pads := true
 var mode := ""
 
 var area: Node3D
@@ -34,6 +36,7 @@ func _ready() -> void:
 	_build_environment()
 
 	var input := RunnerInput.new()
+	input.use_pads = use_pads
 	_input = input
 	add_child(input)
 
