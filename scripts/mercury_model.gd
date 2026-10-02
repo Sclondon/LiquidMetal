@@ -54,6 +54,8 @@ var _kick_rate := 0.0 # how fast the kick's two steps play
 var _cock := 0.0
 var _punch := 0.0
 var _stretch: Array[float] = []
+var _reach_fix: Array[float] = []
+var _arm_length := 1.0 # an arm blade's length in the model (from its mesh)
 var _turned: Array[Vector3] = [] # per part: its own extra turn (euler), kept here, not read back off a scaled basis # per part: drawn out along its length (the punching arm)
 ## Something nearby to look at (the player picks it; INF: nothing)
 var look_point := Vector3.INF
@@ -112,6 +114,7 @@ func _ready() -> void:
 		view.add_child(jiggle)
 		_jiggles.append(jiggle)
 		if view.name.begins_with("arm_"):
+			_arm_length = box.size.y * MODEL_SCALE
 			_hands[String(view.name).right(1)] = jiggle
 			_hand_tip = Vector3(0.0, box.position.y, 0.0)
 		if view.name.begins_with("head"):
@@ -148,6 +151,7 @@ func _ready() -> void:
 		_deform.append(deform)
 		_splash.append(0.0)
 		_stretch.append(1.0)
+		_reach_fix.append(1.0)
 		_turned.append(Vector3.ZERO)
 		var ball := MeshInstance3D.new()
 		ball.mesh = ball_mesh
@@ -355,12 +359,13 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			var d: float = at - lunge
 			if d > LUNGE_WINDOW.x and d < LUNGE_WINDOW.y:
 				rate = (LUNGE_WINDOW.y - LUNGE_WINDOW.x) / hold # crawl through it: held for `hold` s
-				if turning and d > 0.0 and _switch_step <= 0.0:
+				var inside: bool = lunge == (0.6 if steer > 0.0 else 0.0) # (the inside leg forward)
+				if turning and inside and d > 0.0 and _switch_step <= 0.0:
 					rate = 0.0 # into the turn: held right there till it straightens out
 		if _kick_left > 0.0:
 			_kick_left -= _delta
 			rate = _kick_rate if _kick_left > 0.04 else 0.0
-		if _punch > 0.3 or (_cock >= 1.0 and _kick_left <= 0.0):
+		if _punch > 0.3:
 			rate = 0.0 # held in the lunge while the punch carries him
 		_anim.speed_scale = rate
 	else:
@@ -370,7 +375,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		_part_materials[i].set_shader_parameter("splash", _splash[i])
 	# Into a turn: the body swung round to face into it (stepping that way) and leaning into it,
 	# the head turned further still, looking round the corner
-	_model.rotation = Vector3(0.0, -steer * 0.4, -steer * 0.5)
+	_model.rotation = Vector3(0.0, -steer * 0.4, -steer * 0.5) * (0.0 if pose == "slide" else 1.0)
 	# The stride's phase (0..1 over the cycle: left lunge at 0, right at 0.5) drives the little
 	# extras: the head turning a touch with each stride, and the arms pumping when slow
 	var phase := 0.0
@@ -400,7 +405,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			# the launch claps them together out in front (aimed dead ahead in _bounce)
 			var out_sign := 1.0 if side == "R" else -1.0
 			var wind := _cock - 1.0 if _cock > 1.0 else 0.0
-			var cocked := Vector3(-1.3 - wind * 0.8, 0.0, out_sign * (1.0 + wind * 0.5))
+			var cocked := Vector3(-1.3 - wind * 2.2, 0.0, out_sign * (1.0 + wind * 0.9))
 			var thrown := Vector3(2.55, 0.0, 0.0)
 			turn = turn.lerp(cocked, minf(_cock, 1.0)).lerp(thrown, _punch)
 		var index := _jiggles.find(arm)
@@ -457,7 +462,7 @@ func _bounce(delta: float) -> void:
 		_ball_shape[i] = Basis.looking_at(along, up) * Basis.from_scale(Vector3(1.0 - pull * 0.35, 1.0 - pull * 0.35, 1.0 + pull))
 		# Into the part's own space (its scale included), so the mesh sits where the spring is
 		var local := part.global_basis.inverse() * offset
-		_jiggles[i].position = local
+		_jiggles[i].position = local * (1.0 - _punch if _hands.values().has(_jiggles[i]) else 1.0) # (the clap: locked on target)
 		var shape := Vector3.ONE
 		if _deform[i] > 0.0:
 			# Legs: stretched when the spring hangs below the joint's path, squashed above it
@@ -475,7 +480,22 @@ func _bounce(delta: float) -> void:
 		if _punch > 0.0 and _hands.values().has(_jiggles[i]):
 			# The punch: aimed dead ahead, whatever the body's doing (the blade hangs along -y)
 			var ahead: Vector3 = (get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z
-			var y := -ahead.normalized()
+			# Both hands meet at one point out ahead: each arm aimed at it, and stretched to reach it
+			var middle := Vector3.ZERO
+			for arm in _hands.values():
+				middle += (arm as Node3D).get_parent().global_position
+			middle /= maxf(_hands.size(), 1)
+			var meet := middle + ahead.normalized() * 1.9
+			var to_meet := meet - _parts[i].global_position
+			var y := -to_meet.normalized()
+			# (corrected each frame by how far the tip actually got: it converges onto the point)
+			var tip_now: Vector3 = _jiggles[i].global_transform * _hand_tip
+			var got := (tip_now - _parts[i].global_position).length()
+			if got > 0.05 and _punch > 0.5:
+				_reach_fix[i] = clampf(_reach_fix[i] * to_meet.length() / got, 0.3, 4.0)
+			var arm_reach := to_meet.length() / maxf(_arm_length * global_basis.get_scale().x, 0.01) * _reach_fix[i]
+			var thin := 1.0 / sqrt(lerpf(1.0, arm_reach, _punch))
+			shape = shape / Vector3(1.0 / sqrt(_stretch[i]), _stretch[i], 1.0 / sqrt(_stretch[i])) * Vector3(thin, lerpf(1.0, arm_reach, _punch), thin)
 			var x := y.cross(Vector3.UP).normalized()
 			var aimed := Basis(x, y, x.cross(y))
 			var aim_local := (_parts[i].global_basis.orthonormalized().inverse() * aimed).orthonormalized()

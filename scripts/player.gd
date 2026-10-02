@@ -124,10 +124,11 @@ var _look_clock := 0.0
 var _bounce_t := 9.0
 var _dash_kick := 0.0
 var _punch := 0.0
+var _floor_y := 0.0 # the floor's height, last time he was on it
 var _charging := false # the dash held down: winding up the punch
 var _charge := 0.0 # 0 .. 1 how wound up
 var _dash_power := 1.0
-const CHARGE_TIME := 0.9 # seconds to wind up fully
+const CHARGE_TIME := 1.5 # seconds to wind up fully
 var _last_velocity := Vector3.ZERO
 # A crash: blobs of him flung on with his momentum, splatting where they hit
 var _crash_balls: Array[Dictionary] = [] # { view, velocity, radius }
@@ -611,7 +612,7 @@ func _physics_process(delta: float) -> void:
 	if ducking:
 		_duck_left -= delta
 		var held: bool = input.duck_held()
-		if (_duck_left <= 0.0 and not held) or (absf(input.turn) > 0.5 and _sink < 0.5):
+		if _duck_left <= 0.0 and not held:
 			_set_ducking(false) # (turning: up out of it, back to skating)
 			if not ducking:
 				_duck_left = 0.0
@@ -673,8 +674,6 @@ func _process(delta: float) -> void:
 		var s := clampf(velocity.y / 30.0, -0.2, 0.25)
 		stretch = Vector3(1.0 - s * 0.5, 1.0 + s, 1.0 - s * 0.5)
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
-	if is_dashing():
-		stretch *= Vector3(0.88, 0.92, 1.35) # drawn out along the dash
 	if _bounce_t < 1.2:
 		# Snapped back up out of the puddle: shoots up tall, then wobbles down to size
 		_bounce_t += delta
@@ -1084,7 +1083,9 @@ func _old_wall_surface_unused() -> void:
 ## The floor's liquid surface: every puddle on the floor as a disc (the big slide puddle as a
 ## row of three along it), for the shader to melt together
 func _feed_surface() -> void:
-	_surface.global_position = Vector3(global_position.x, global_position.y + 0.015, global_position.z)
+	if is_on_floor() and not wall_running:
+		_floor_y = global_position.y
+	_surface.global_position = Vector3(global_position.x, _floor_y + 0.015, global_position.z) # (stays on the floor when he jumps)
 	var o := _surface.global_position
 	var blobs: Array[Vector4] = []
 	for dab in _dabs:
