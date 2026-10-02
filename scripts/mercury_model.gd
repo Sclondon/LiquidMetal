@@ -49,7 +49,8 @@ var _springs_ready := false
 var _clock := 0.0
 var _head_jiggle: Node3D
 var _arm_pump := 0.0
-var _kick_left := 0.0 # a dash kicking off: one hard stride, fast
+var _kick_left := 0.0 # a dash kicking off: one quick switch of legs
+var _kick_to := 0.0 # the lunge it switches into
 ## Something nearby to look at (the player picks it; INF: nothing)
 var look_point := Vector3.INF
 var _look_yaw := 0.0
@@ -216,9 +217,11 @@ func ripple_all(amount := 1.0) -> void:
 		_splash[i] = maxf(_splash[i], amount)
 
 
-## A dash kicking off: one hard, quick stride through to the next lunge
+## A dash kicking off: a quick switch of legs into the other lunge, held till the twirl
 func kick(time: float) -> void:
 	_kick_left = time
+	var at := fmod(_anim.current_animation_position, 1.2)
+	_kick_to = 0.6 if at < 0.6 else 0.0
 
 
 ## Set a liquid-metal shader setting on every part, ball and the base material
@@ -342,7 +345,8 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 					rate = 0.0 # into the turn: held right there till it straightens out
 		if _kick_left > 0.0:
 			_kick_left -= _delta
-			rate = 0.6 / 0.2 # half a cycle (one stride) in the kick's 0.2 s
+			var left := fmod(_kick_to - fmod(_anim.current_animation_position, 1.2) + 1.2, 1.2)
+			rate = 0.0 if left < 0.03 or left > 1.1 else left / maxf(_kick_left - 0.06, 0.04) # there, then held
 		_anim.speed_scale = rate
 	else:
 		_anim.speed_scale = 1.0

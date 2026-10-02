@@ -668,7 +668,8 @@ func _process(delta: float) -> void:
 	_figure.transform = Transform3D(body, (pivot - body * pivot + Vector3.UP * hop * (1.0 - melt)).lerp(wall_spot, smoothstep(0.0, 1.0, _wall_roll)))
 	var pose_steer := 0.0 if wall_running else steer
 	_look_around(delta)
-	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor() and not wall_running, velocity.y, pose_steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
+	var tucked := (not is_on_floor() and not wall_running) or _dodge_left > 0.0 or (is_dashing() and _dash_kick <= 0.0)
+	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), tucked, velocity.y, pose_steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
 	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
@@ -707,7 +708,20 @@ func _process(delta: float) -> void:
 				2: at = _figure.hand()
 				3: at = _figure.hand("L")
 				4: at = _figure.hand("R")
-				5: at = global_position + (dab.get_meta("offset", Vector3.ZERO) as Vector3)
+				5:
+					var offset: Vector3 = dab.get_meta("offset", Vector3.ZERO)
+					if dab.has_meta("merge"):
+						var t: float = dab.get_meta("merge") + delta / 0.22
+						dab.set_meta("merge", t)
+						offset = offset.lerp(_pool_offset, minf(t, 1.0))
+						dab.set_meta("offset", offset)
+						dab.scale *= 0.9
+						if t >= 1.0:
+							dab.remove_meta("merge")
+							dab.set_meta("follow", -1)
+							dab.visible = false
+							continue
+					at = global_position + offset
 				_: at = feet_now[mini(follow, feet_now.size() - 1)]
 			if at.y - global_position.y > 0.2:
 				# Lifted off the floor: its puddle goes
@@ -715,7 +729,13 @@ func _process(delta: float) -> void:
 				dab.visible = false
 				continue
 			dab.global_position = Vector3(at.x, global_position.y + 0.01, at.z)
-	if melt > 0.5:
+	if melt > 0.5 and _sink < 0.5:
+		# The dive: tracks from both feet and both hands, trailing on the floor behind
+		var touching: Array[Vector3] = _figure.feet()
+		touching.append(_figure.hand("L"))
+		touching.append(_figure.hand("R"))
+		_trail.step(touching, ground, 0.16, delta)
+	elif melt > 0.5:
 		# A puddle smears one wide track along under its middle
 		# (laid from under the back of the puddle, so its front end never shows ahead of it)
 		var under: Array[Vector3] = [global_position - forward() * 0.6]
@@ -792,34 +812,35 @@ func _process(delta: float) -> void:
 ## Landing: a splash of metal particles thrown up from the feet and fanned out along the floor
 ## The dive: a little puddle under each part of him that's down on the floor, following it
 func _slide_dabs() -> void:
-	var feet := _figure.feet()
-	for f in feet.size():
-		_dab(feet[f], f, 0.0, 0.55, Vector3.UP, 30.0)
+	# Right under where he touches the floor: feet, hands, and whatever else of him is down low;
+	# each one riding along with him
+	var spots: Array[Vector3] = _figure.feet()
 	for side in ["L", "R"]:
-		var hand := _figure.hand(side)
-		if hand.y - global_position.y < 0.35:
-			_dab(hand, 3 if side == "L" else 4, 0.0, 0.45, Vector3.UP, 30.0)
+		spots.append(_figure.hand(side))
 	for part in _figure.parts():
-		if part.global_position.y - global_position.y < 0.8:
-			_dab(part.global_position, -1, 0.0, 0.5, Vector3.UP, 0.6)
-	# ...and a scatter of little ones all round him, riding along with him
-	for k in 9:
-		var offset := Vector3(randf_range(-0.7, 0.7), 0.0, randf_range(-1.1, 0.9))
-		var dab := _dab(global_position + offset, 5, randf_range(0.0, 0.12), randf_range(0.25, 0.5), Vector3.UP, 30.0)
+		if part.global_position.y - global_position.y < 0.3:
+			spots.append(part.global_position)
+	for spot in spots:
+		if spot.y - global_position.y > 0.3:
+			continue
+		var offset := spot - global_position
+		offset.y = 0.0
+		var dab := _dab(spot, 5, randf_range(0.0, 0.08), randf_range(0.7, 1.0), Vector3.UP, 30.0)
 		dab.set_meta("offset", offset)
 
 
-## Sinking in: the little puddles slide in together under him and go into the big one
+## Sinking in: the little puddles slide in together under him (riding along with him as they go)
+## and run into the big one
 func _merge_slide_dabs() -> void:
-	var centre := global_transform * _pool_offset
 	for dab in _dabs:
 		if not dab.visible:
 			continue
-		dab.set_meta("follow", -1)
-		var merge := create_tween()
-		merge.tween_property(dab, "global_position", Vector3(centre.x, dab.global_position.y, centre.z), 0.18).set_ease(Tween.EASE_IN)
-		merge.parallel().tween_property(dab, "scale", dab.scale * 0.4, 0.18)
-		merge.tween_callback(func(): dab.visible = false)
+		if int(dab.get_meta("follow", -1)) != 5:
+			var offset := dab.global_position - global_position
+			offset.y = 0.0
+			dab.set_meta("offset", offset)
+			dab.set_meta("follow", 5)
+		dab.set_meta("merge", 0.0)
 
 
 ## Every so often: the nearest thing ahead (an obstacle, a drop) for him to look at
@@ -886,6 +907,8 @@ func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := 
 	# Taken now (shown, too small to see), so another dab this frame doesn't take the same one
 	dab.visible = true
 	dab.set_meta("follow", follow)
+	if dab.has_meta("merge"):
+		dab.remove_meta("merge")
 	dab.set_meta("slide", linger > 10.0)
 	dab.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * 0.001), spot)
 	var size := randf_range(0.5, 0.75) * size_scale

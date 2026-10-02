@@ -6,7 +6,7 @@ var main: Node
 var t := 0.0
 var ducked := false
 var held := true
-var times := [1.1, 1.25, 1.4, 1.55, 1.75, 1.95, 2.05, 2.12, 2.2, 2.3, 2.45, 2.7]
+var times := [2.08, 2.18, 2.3, 2.42, 2.55, 2.75, 3.05, 3.12, 3.2, 3.3, 3.45, 3.7]
 var taken := 0
 
 
@@ -20,21 +20,21 @@ func _initialize() -> void:
 func _process(delta: float) -> bool:
 	t += delta
 	var player: CharacterBody3D = main.player
-	player.run_speed = 8.0
+	player.run_speed = 4.0
 	var cam: Camera3D = main.cam
 	cam.target = null
 	var at: Vector3 = player.get_global_transform_interpolated().origin
 	cam.global_position = at + player.right() * 3.2 + Vector3.UP * 1.6 + player.forward() * 1.0
 	cam.look_at(at + Vector3.UP * 0.4)
 	cam.fov = 45.0
-	if t >= 1.0 and not ducked:
+	if t >= 2.0 and not ducked:
 		ducked = true
 		player.input.duck.emit()
 		var e := InputEventKey.new()
 		e.physical_keycode = KEY_S
 		e.pressed = true
 		Input.parse_input_event(e) # held down: it sinks in
-	if t >= 2.0 and held:
+	if t >= 3.0 and held:
 		held = false
 		var u := InputEventKey.new()
 		u.physical_keycode = KEY_S

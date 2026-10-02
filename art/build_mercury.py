@@ -308,15 +308,17 @@ def slide_keys():
     key(thigh_r, 0, rx=-10)
     key(shin_r, 0, rx=-60)
     ninja_arms(0, rx=-30)
+    # Down low: the lead leg out flat along the floor, the other folded right under with its foot
+    # down, leaning back, arms flung back with the hands trailing on the floor behind
     for frame in (5, 8):
-        key(hips, frame, rx=22, z=-0.85)
-        key(chest, frame, rx=14)
-        key(head, frame, rx=-18)  # still looking where it's going
-        key(thigh_l, frame, rx=84)
-        key(shin_l, frame, rx=-4)
-        key(thigh_r, frame, rx=30, ry=-12)
-        key(shin_r, frame, rx=-125)
-        ninja_arms(frame, rx=-95)  # arms thrown right back
+        key(hips, frame, rx=18, z=-1.3)
+        key(chest, frame, rx=34)  # thrown back
+        key(head, frame, rx=30)  # thrown back  # still looking where it's going
+        key(thigh_l, frame, rx=78)
+        key(shin_l, frame, rx=0)
+        key(thigh_r, frame, rx=52, ry=-14)
+        key(shin_r, frame, rx=-150)
+        ninja_arms(frame, rx=-62)  # arms thrown back, near straight down to the floor, hands on the floor behind
 
 
 def land_keys(hand):
