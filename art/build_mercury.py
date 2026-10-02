@@ -8,8 +8,8 @@
 # a point, with a guard rising above the knee). Faces +Y in Blender (= -Z in Godot).
 #
 # Animations (NLA tracks; each becomes one glTF animation across all the parts):
-#   run  - 36 frames at 30 fps, looping: a long, snappy skating stride (push out to the side, glide), body
-#          banking over the gliding leg, leaning forward, arms trailing back ninja-run style
+#   run  - 36 frames at 30 fps, looping: long, snappy strides, each a deep lunge, body
+#          banking over the front leg, leaning forward, arms trailing back ninja-run style
 #   jump - snaps from the push-off into a leap (knees tucked, arms swept back) and holds it
 
 import math
@@ -231,15 +231,16 @@ def ninja_arms(frame, sway=0.0, rx=-28, bob=0.0):
 
 
 def run_keys():
-    # Skating: one leg glides under the body, knee bent, while the other pushes out to the
-    # side and back, snaps straight, then lifts, folds and swings back in to glide.
+    # Lunging: every stride drops into a deep lunge (front thigh driven forward nearly level, knee
+    # bent deep, the back leg straight out behind), rises, and the back leg whips through to
+    # lunge next. A little push out to the side from skating is left in.
     # (swing forward, out to the side, knee bend) every 6 frames for the left leg; the right is
     # half a cycle behind, mirrored.
     stride = [
-        (28, 0, -50),  # gliding under the body, reaching forward
-        (-26, 40, -22),  # pushing out and back
-        (-60, 58, 0),  # push snapped straight, far out behind
-        (6, 24, -118),  # lifted high, knee folded, swinging back in
+        (76, 4, -86),  # the lunge: thigh driven forward nearly level, knee deep, shin planted
+        (22, 14, -42),  # rising off it, pushing back and a little out
+        (-52, 20, -4),  # straight out far behind (the other leg's lunge)
+        (-8, 10, -112),  # whipped through, knee folded high
     ]
     step = RUN_FRAMES // len(stride)
     for tag, side, shift in (("L", -1, 0), ("R", 1, len(stride) // 2)):
@@ -251,10 +252,12 @@ def run_keys():
     # The body rides over whichever leg is gliding: shifts and banks onto it, dips as the push
     # starts, rises as it snaps straight. The upper body leans well forward throughout (the
     # chest leans, not the hips, so the legs stay under it).
-    for frame24, shift_x, bank, bob in ((0, -0.18, -16, 0.0), (6, -0.09, -9, -0.13), (10, 0.04, 4, 0.06),
-                                      (12, 0.18, 16, 0.0), (18, 0.09, 9, -0.13), (22, -0.04, -4, 0.06), (24, -0.18, -16, 0.0)):
+    # Hips sink deep into each lunge (the front thigh level, the back leg straight) and rise
+    # between them
+    for frame24, shift_x, bank, bob in ((0, -0.12, -12, -0.55), (6, 0.0, 0, -0.1), (12, 0.12, 12, -0.55),
+                                      (18, 0.0, 0, -0.1), (24, -0.12, -12, -0.55)):
         frame = round(frame24 * RUN_FRAMES / 24)  # laid out on a 24-frame cycle
-        key(hips, frame, ry=bank, x=shift_x, z=bob - 0.08)
+        key(hips, frame, ry=bank, x=shift_x, z=bob)
         key(chest, frame, rx=-32, rz=-bank * 1.2)
         key(head, frame, rx=36, ry=-bank * 0.6)  # head up against the lean, eyes on the track
     # The arms float on their own: bobbing once per push, a beat behind the body, swaying a little
