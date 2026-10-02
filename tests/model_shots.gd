@@ -10,7 +10,11 @@ var taken := {}
 var shots := [
 	[1.2, "front", Vector3(0.6, 1.3, 3.2)],
 	[1.6, "three_quarter", Vector3(2.4, 1.4, 2.4)],
-	[2.0, "side", Vector3(3.3, 1.2, 0.0)],
+	[1.8, "side_1", Vector3(3.3, 1.1, 0.0)],
+	[1.85, "side_2", Vector3(3.3, 1.1, 0.0)],
+	[1.9, "side_3", Vector3(3.3, 1.1, 0.0)],
+	[1.95, "side_4", Vector3(3.3, 1.1, 0.0)],
+	[2.0, "side_5", Vector3(3.3, 1.1, 0.0)],
 	[2.25, "back", Vector3(-1.0, 1.8, -3.5)],
 	[2.6, "jump", Vector3(3.3, 1.8, 0.5)],
 	[3.25, "duck", Vector3(2.8, 1.3, 1.0)],
@@ -27,10 +31,12 @@ func _process(delta: float) -> bool:
 	var player: CharacterBody3D = main.player
 	var cam: Camera3D = main.cam
 	cam.target = null
-	var shot: Array = shots[0]
+	# The camera for the next shot due
+	var shot: Array = shots[-1]
 	for s in shots:
-		if t >= s[0] - 0.4:
+		if not taken.has(s[1]):
 			shot = s
+			break
 	# Keep it running on the clear stretch before the first hurdle
 	if player.global_position.z < 110.0 and not player.dead and player.is_on_floor():
 		player.global_position.z += 14.0
