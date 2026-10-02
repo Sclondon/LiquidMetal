@@ -49,6 +49,7 @@ var _springs_ready := false
 var _clock := 0.0
 var _head_jiggle: Node3D
 var _arm_pump := 0.0
+var _kick_left := 0.0 # a dash kicking off: one hard stride, fast
 ## Something nearby to look at (the player picks it; INF: nothing)
 var look_point := Vector3.INF
 var _look_yaw := 0.0
@@ -215,6 +216,11 @@ func ripple_all(amount := 1.0) -> void:
 		_splash[i] = maxf(_splash[i], amount)
 
 
+## A dash kicking off: one hard, quick stride through to the next lunge
+func kick(time: float) -> void:
+	_kick_left = time
+
+
 ## Set a liquid-metal shader setting on every part, ball and the base material
 func set_shader(setting: String, value: Variant) -> void:
 	material.set_shader_parameter(setting, value)
@@ -334,6 +340,9 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 				rate = (LUNGE_WINDOW.y - LUNGE_WINDOW.x) / hold # crawl through it: held for `hold` s
 				if turning and d > 0.0 and _switch_step <= 0.0:
 					rate = 0.0 # into the turn: held right there till it straightens out
+		if _kick_left > 0.0:
+			_kick_left -= _delta
+			rate = 0.6 / 0.2 # half a cycle (one stride) in the kick's 0.2 s
 		_anim.speed_scale = rate
 	else:
 		_anim.speed_scale = 1.0

@@ -307,7 +307,7 @@ def slide_keys():
     key(shin_l, 0, rx=-40)
     key(thigh_r, 0, rx=-10)
     key(shin_r, 0, rx=-60)
-    ninja_arms(0, rx=10)
+    ninja_arms(0, rx=-30)
     for frame in (5, 8):
         key(hips, frame, rx=22, z=-0.85)
         key(chest, frame, rx=14)
@@ -316,7 +316,7 @@ def slide_keys():
         key(shin_l, frame, rx=-4)
         key(thigh_r, frame, rx=30, ry=-12)
         key(shin_r, frame, rx=-125)
-        ninja_arms(frame, rx=36)
+        ninja_arms(frame, rx=-95)  # arms thrown right back
 
 
 def land_keys(hand):

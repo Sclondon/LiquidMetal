@@ -68,6 +68,7 @@ const REWIND := 1.2 # seconds back along your path a splat sends you
 const DASH_BOOST := 2.2 # times run speed
 const DASH_TIME := 0.35
 const DASH_COOLDOWN := 1.2
+const DASH_KICK := 0.2 # the stride kicking off a dash, before the twirl
 const BOOST := 10.0 # m/s a boost pad adds
 
 # Tunables (the HUD's tuning panel changes these live)
@@ -110,10 +111,12 @@ var _blob := MeshInstance3D.new() # the puddle it melts into
 var _puddle_eyes: Array[MeshInstance3D] = []
 var _puddled := false # flat as a puddle (past the splat)
 var _sink := 0.0 # 0 in the dive pose .. 1 sunk right into the puddle
+const SLIDE_BOOST := 4.0 # m/s the dive into a slide adds
 const SINK_DELAY := 0.4 # seconds ducking before he sinks into it
 var _pool_offset := Vector3.ZERO # where the puddle sits under him
 var _look_clock := 0.0
-var _bounce_t := 9.0 # seconds since snapping back up out of the puddle
+var _bounce_t := 9.0
+var _dash_kick := 0.0 # seconds since snapping back up out of the puddle
 var _clock := 0.0
 var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
@@ -455,12 +458,14 @@ func is_dashing() -> bool:
 func _on_dash() -> void:
 	if dead or dash_cooldown > 0.0:
 		return
-	_dash_left = DASH_TIME
+	_dash_left = DASH_TIME + DASH_KICK
 	dash_cooldown = DASH_COOLDOWN
 	_agitation = 1.0
-	_liquid_hold = DASH_TIME + 0.1
-	_trick("dash", 1.0, DASH_TIME + 0.05)
-	_droplets.burst(6, 1.3)
+	# First the kick-off: one hard, quick stride (the speed's already coming); then the twirl,
+	# going to jelly
+	_dash_kick = DASH_KICK
+	_figure.kick(DASH_KICK)
+	_droplets.burst(3, 1.0)
 	dashed.emit()
 
 
@@ -603,8 +608,9 @@ func _process(delta: float) -> void:
 		_bounce_t = 0.0 # let go: snapping back up out of it, with a bounce
 		_droplets.burst(4, 1.0)
 	if _melt > 0.7 and not _puddled:
-		# The dive: a little puddle under everything that's touching the floor
+		# The dive: a little puddle under everything that's touching the floor, and a burst of speed
 		_puddled = true
+		speed = maxf(speed, run_speed) + SLIDE_BOOST
 		_slide_dabs()
 	elif _melt < 0.3 and _puddled:
 		# Back up out of the dive, a few drops flung off, its little puddles gone with it
@@ -666,7 +672,13 @@ func _process(delta: float) -> void:
 	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
-	var liquid := (not is_on_floor() and not wall_running) or is_dashing() or _liquid_hold > 0.0
+	if _dash_kick > 0.0:
+		_dash_kick -= delta
+		if _dash_kick <= 0.0:
+			_liquid_hold = DASH_TIME + 0.1
+			_trick("dash", 1.0, DASH_TIME + 0.05)
+			_droplets.burst(5, 1.3)
+	var liquid := (not is_on_floor() and not wall_running) or (is_dashing() and _dash_kick <= 0.0) or _liquid_hold > 0.0
 	_figure.set_liquid(1.0 if liquid else 0.0, delta)
 
 	# Now and then, running, a blob or two shakes loose
@@ -695,6 +707,7 @@ func _process(delta: float) -> void:
 				2: at = _figure.hand()
 				3: at = _figure.hand("L")
 				4: at = _figure.hand("R")
+				5: at = global_position + (dab.get_meta("offset", Vector3.ZERO) as Vector3)
 				_: at = feet_now[mini(follow, feet_now.size() - 1)]
 			if at.y - global_position.y > 0.2:
 				# Lifted off the floor: its puddle goes
@@ -787,8 +800,13 @@ func _slide_dabs() -> void:
 		if hand.y - global_position.y < 0.35:
 			_dab(hand, 3 if side == "L" else 4, 0.0, 0.45, Vector3.UP, 30.0)
 	for part in _figure.parts():
-		if part.global_position.y - global_position.y < 0.45:
+		if part.global_position.y - global_position.y < 0.8:
 			_dab(part.global_position, -1, 0.0, 0.5, Vector3.UP, 0.6)
+	# ...and a scatter of little ones all round him, riding along with him
+	for k in 9:
+		var offset := Vector3(randf_range(-0.7, 0.7), 0.0, randf_range(-1.1, 0.9))
+		var dab := _dab(global_position + offset, 5, randf_range(0.0, 0.12), randf_range(0.25, 0.5), Vector3.UP, 30.0)
+		dab.set_meta("offset", offset)
 
 
 ## Sinking in: the little puddles slide in together under him and go into the big one
@@ -846,7 +864,7 @@ func _lift_dabs() -> void:
 
 ## A little puddle on the floor under a contact point of the superhero landing (follow: 0 / 1 the
 ## left / right foot, 2 the hand), carried along under it as it slides
-func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := Vector3.UP, linger := 0.5) -> void:
+func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := Vector3.UP, linger := 0.5) -> MeshInstance3D:
 	var dab: MeshInstance3D = null
 	for d in _dabs:
 		if not d.visible:
@@ -881,6 +899,7 @@ func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := 
 	tween.tween_interval(linger)
 	tween.tween_property(dab, "scale", Vector3(0.01, 0.01, 0.01), 0.6).set_ease(Tween.EASE_IN)
 	tween.tween_callback(func(): dab.visible = false)
+	return dab
 
 
 func _land_splat() -> void:
