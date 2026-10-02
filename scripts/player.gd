@@ -616,9 +616,8 @@ func _process(delta: float) -> void:
 		# Back up out of the dive, a few drops flung off, its little puddles gone with it
 		_puddled = false
 		for dab in _dabs:
-			if dab.visible and dab.get_meta("slide", false):
-				dab.visible = false
-				dab.set_meta("follow", -1)
+			if dab.visible and dab.get_meta("slide", false) and int(dab.get_meta("follow", -1)) >= 0:
+				_lift_dab(dab) # each one pulled up into a flying ball
 		_squash = -0.2
 		_droplets.burst(3, 0.8)
 
@@ -724,16 +723,16 @@ func _process(delta: float) -> void:
 					at = global_position + offset
 				_: at = feet_now[mini(follow, feet_now.size() - 1)]
 			if at.y - global_position.y > 0.2:
-				# Lifted off the floor: its puddle goes
-				dab.set_meta("follow", -1)
-				dab.visible = false
+				# Lifted off the floor: its puddle pulls up into a flying ball
+				_lift_dab(dab)
 				continue
 			dab.global_position = Vector3(at.x, global_position.y + 0.01, at.z)
 	if melt > 0.5 and _sink < 0.5:
-		# The dive: tracks from both feet and both hands, trailing on the floor behind
-		var touching: Array[Vector3] = _figure.feet()
-		touching.append(_figure.hand("L"))
-		touching.append(_figure.hand("R"))
+		# The dive: a track from each of its little puddles (by its slot, so each keeps its own)
+		var touching: Array[Vector3] = []
+		for dab in _dabs:
+			var down := dab.visible and int(dab.get_meta("follow", -1)) >= 0
+			touching.append(dab.global_position if down else dab.global_position + Vector3.UP * 50.0)
 		_trail.step(touching, ground, 0.16, delta)
 	elif melt > 0.5:
 		# A puddle smears one wide track along under its middle
@@ -878,9 +877,24 @@ func _look_around(delta: float) -> void:
 func _lift_dabs() -> void:
 	for dab in _dabs:
 		if dab.visible and int(dab.get_meta("follow", -1)) >= 0:
-			_droplets.burst_at(dab.global_position, 2)
-			dab.set_meta("follow", -1)
-			dab.visible = false
+			_lift_dab(dab)
+
+
+## A puddle whose contact has lifted off the floor: it pulls up into a flying ball (which follows
+## him back) and shrinks quickly away
+func _lift_dab(dab: MeshInstance3D) -> void:
+	_droplets.burst_at(dab.global_position, 1)
+	_shrink_dab(dab)
+
+
+## A puddle going: shrinks away quickly rather than vanishing
+func _shrink_dab(dab: MeshInstance3D, time := 0.12) -> void:
+	dab.set_meta("follow", -1)
+	if dab.has_meta("merge"):
+		dab.remove_meta("merge")
+	var tween := create_tween()
+	tween.tween_property(dab, "scale", Vector3(0.01, 0.01, 0.01), time).set_ease(Tween.EASE_IN)
+	tween.tween_callback(func(): dab.visible = false)
 
 
 ## A little puddle on the floor under a contact point of the superhero landing (follow: 0 / 1 the

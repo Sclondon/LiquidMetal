@@ -111,12 +111,26 @@ func _process(delta: float) -> void:
 		ray.exclude = [source.get_rid()]
 		var hit := get_world_3d().direct_space_state.intersect_ray(ray)
 		if not hit.is_empty():
-			# Splat: it's gone, left as a little splash on whatever it hit
-			splatted.emit(hit.position, hit.normal)
-			view.visible = false
-			_pool.append(view)
-			_live.remove_at(i)
-			continue
+			# Splat: a little splash on whatever it hit. Close to home, it doesn't give up: it
+			# picks itself up and keeps trying for another second; too far, it's gone
+			var normal: Vector3 = hit.normal
+			if drop.get("splat_cooldown", 0.0) <= 0.0:
+				splatted.emit(hit.position, normal)
+				drop.splat_cooldown = 0.25
+			if view.global_position.distance_to(home) < 3.0 and drop.get("since_splat", 0.0) < 1.0:
+				to = hit.position + normal * 0.06
+				velocity = velocity.slide(normal) * 0.3 + normal * 1.5
+				drop.age = minf(drop.age, FREE_TIME + 0.2) # (the pull starts gently again)
+				if not drop.has("since_splat"):
+					drop.since_splat = 0.0
+			else:
+				view.visible = false
+				_pool.append(view)
+				_live.remove_at(i)
+				continue
+		drop.splat_cooldown = drop.get("splat_cooldown", 0.0) - delta
+		if drop.has("since_splat"):
+			drop.since_splat += delta # (a second to get home after splatting)
 		drop.velocity = velocity
 		view.global_position = to
 		# Stretched along its motion, like a drop of liquid
