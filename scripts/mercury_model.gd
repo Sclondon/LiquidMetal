@@ -4,8 +4,8 @@ extends Node3D
 ## others; the model's own animations run it ("run", a looping stride) and leap ("jump",
 ## a held pose). Faces -Z.
 
-const MODEL_SCALE := 0.72 # the .glb is ~2.7 m to the horn tip; this makes it ~2 m
-const RUN_PACE := 10.0 # run speed (m/s) at which the stride plays at its authored rate
+const MODEL_SCALE := 0.66 # the .glb is ~3.1 m to the horn tip; this makes it ~2 m
+const RUN_PACE := 14.0 # run speed (m/s) at which the stride plays at its authored rate
 const BLEND := 0.08 # seconds to blend between run and jump: snappy
 
 var material: Material

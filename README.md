@@ -24,7 +24,8 @@ Hitting something head-on splats you; you pull back together about a second back
 ## The character (Blender)
 
 `art/build_mercury.py` builds Mercury (after `mercury.png`) in Blender: floating faceted parts, three horns,
-big two-piece legs, a snappy `run` cycle and a `jump` leap. It saves `art/mercury.blend` (open it to tweak) and
+a sharp mask with three horns, long two-piece legs with knee guards, a skating `run` cycle
+with ninja-run arms, and a `jump` leap. It saves `art/mercury.blend` (open it to tweak) and
 exports `models/mercury.glb`:
 
     "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe" -b --factory-startup --python art/build_mercury.py
