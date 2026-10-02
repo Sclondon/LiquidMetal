@@ -26,7 +26,11 @@ var _wall_cooldown := 0.0
 var _wall_roll := 0.0 # the figure turned onto its side, smoothed
 var _wall_tween: Tween # the puddle splatted against something
 var _arm_puddles: Array[MeshInstance3D] = []
-var _dabs: Array[MeshInstance3D] = [] # little puddles left at the landing's contact points
+var _dabs: Array[MeshInstance3D] = []
+# Every puddle on the floor drawn as one liquid surface, melting into its neighbours
+var _surface := MeshInstance3D.new()
+var _surface_material := ShaderMaterial.new()
+const SURFACE_SIZE := 12.0 # little puddles left at the landing's contact points
 var _support := 0.0 # the hand down on a sharp turn, smoothed
 var _dab_hand := 0.0 # seconds till the landing hand's puddle # the arms, splatting a beat after the body
 var _since_dodge := 99.0 # seconds since a dodge began (and which way: _dodge_dir)
@@ -226,6 +230,16 @@ func _ready() -> void:
 	_trail.material = _figure_material
 	add_child(_trail)
 
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(SURFACE_SIZE, SURFACE_SIZE)
+	_surface.mesh = plane
+	_surface_material.shader = preload("res://shaders/puddles.gdshader")
+	_surface.material_override = _surface_material
+	_surface.top_level = true
+	_surface.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_surface.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	add_child(_surface)
+
 	var splash := SphereMesh.new()
 	splash.radius = 0.035
 	splash.height = 0.07
@@ -301,6 +315,7 @@ func _ready() -> void:
 	_probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED
 	add_child(_probe)
 	_own_layer(self)
+	_blob.layers = 0 # (drawn as part of the floor's liquid surface)
 	set_real_reflections(real_reflections)
 
 	input.jump.connect(_on_jump)
@@ -798,6 +813,7 @@ func _process(delta: float) -> void:
 	_blob.scale = Vector3(1.25 * (1.0 + wobble * 0.5 + ripple), 0.32 * maxf(1.0 - wobble - ripple, 0.3), 1.4 * long * (1.0 + wobble * 0.3 - ripple)) * maxf(pooled, 0.01)
 	_blob.position = Vector3(_pool_offset.x, BLOB_RADIUS * _blob.scale.y, _pool_offset.z)
 	_blob.rotation = Vector3(0.0, heading, lean)
+	_feed_surface()
 	# Eyes peeking out of the front of it
 	for eye in _puddle_eyes:
 		eye.visible = false # (his own eyes are still up on his head)
@@ -873,6 +889,29 @@ func _look_around(delta: float) -> void:
 	_figure.look_point = best
 
 
+## The floor's liquid surface: every puddle on the floor as a disc (the big slide puddle as a
+## row of three along it), for the shader to melt together
+func _feed_surface() -> void:
+	var blobs: Array[Vector4] = []
+	for dab in _dabs:
+		if dab.visible and dab.get_meta("floor", false):
+			var r := 0.55 * (dab.scale.x + dab.scale.z) * 0.5
+			if r > 0.01:
+				blobs.append(Vector4(dab.global_position.x, dab.global_position.z, 0.0, r))
+	if _blob.visible and _blob.layers == 0:
+		var centre := _blob.global_position
+		var along := forward() * 0.55 * _blob.scale.z * 0.55
+		var r := 0.55 * _blob.scale.x * 0.95
+		for k in [-1.0, 0.0, 1.0]:
+			var c: Vector3 = centre + along * k
+			blobs.append(Vector4(c.x, c.z, 0.0, r * (1.0 if k == 0.0 else 0.8)))
+	blobs.resize(mini(blobs.size(), 32))
+	_surface.visible = not blobs.is_empty()
+	_surface.global_position = Vector3(global_position.x, global_position.y + 0.015, global_position.z)
+	_surface_material.set_shader_parameter("blobs", blobs)
+	_surface_material.set_shader_parameter("count", blobs.size())
+
+
 ## Jumping off: the puddles following the feet lift off as little balls that follow along
 func _lift_dabs() -> void:
 	for dab in _dabs:
@@ -921,6 +960,8 @@ func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := 
 	# Taken now (shown, too small to see), so another dab this frame doesn't take the same one
 	dab.visible = true
 	dab.set_meta("follow", follow)
+	dab.set_meta("floor", normal == Vector3.UP)
+	dab.layers = 0 if normal == Vector3.UP else 1
 	if dab.has_meta("merge"):
 		dab.remove_meta("merge")
 	dab.set_meta("slide", linger > 10.0)
@@ -1001,6 +1042,7 @@ func _splat(point := Vector3.INF, normal := Vector3.ZERO) -> void:
 
 
 func _wall_puddle(point: Vector3, normal: Vector3) -> void:
+	_blob.layers = 1 # (on the wall: not part of the floor's liquid surface)
 	var flat := Vector3(normal.x, 0.0, normal.z).normalized()
 	var across := flat.cross(Vector3.UP).normalized()
 	# The puddle's thin axis (its y) along the wall's normal
@@ -1087,6 +1129,7 @@ func _on_surface(centre: Vector3, wanted: Vector3, normal: Vector3) -> Vector3:
 
 
 func _respawn_at(spot: Vector3, facing: float) -> void:
+	_blob.layers = 0
 	for arm in _arm_puddles:
 		arm.visible = false
 	if _wall_tween:
