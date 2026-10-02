@@ -38,6 +38,7 @@ var _dodge_left := 0.0
 var _dodge_dir := 0.0
 var _dash_left := 0.0
 var _drip_clock := 0.0
+var _liquid_hold := 0.0 # seconds more to stay as balls of liquid after a move
 var _duck_left := 0.0
 var _fast_fall := false
 var _was_on_floor := true
@@ -154,6 +155,7 @@ func _on_jump() -> void:
 		velocity.y = sqrt(2.0 * GRAVITY * jump_height)
 		_squash = -0.25 # a stretch on take-off
 		_agitation = 1.0
+		_liquid_hold = 0.2
 		_droplets.burst(3)
 
 
@@ -173,6 +175,7 @@ func _on_dodge(direction: float) -> void:
 	_dodge_dir = direction
 	_dodge_left = DODGE_TIME
 	_agitation = 1.0
+	_liquid_hold = 0.3
 	_droplets.burst(3, 0.8)
 
 
@@ -187,6 +190,7 @@ func _on_dash() -> void:
 	_dash_left = DASH_TIME
 	dash_cooldown = DASH_COOLDOWN
 	_agitation = 1.0
+	_liquid_hold = DASH_TIME + 0.1
 	_droplets.burst(6, 1.3)
 	dashed.emit()
 
@@ -277,6 +281,10 @@ func _process(delta: float) -> void:
 	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
 	_figure.rotation = Vector3(0.0, heading, lean)
 	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer)
+	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
+	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
+	var liquid := not is_on_floor() or is_dashing() or _liquid_hold > 0.0
+	_figure.set_liquid(1.0 if liquid else 0.0, delta)
 
 	# Now and then, running, a blob or two shakes loose
 	_drip_clock -= delta

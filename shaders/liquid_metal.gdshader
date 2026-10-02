@@ -6,12 +6,17 @@ shader_type spatial;
 
 uniform float agitation : hint_range(0.0, 1.0) = 0.0;
 uniform float ripple = 1.0; // how much the surface moves (less on the faceted figure)
+// Melting a shape away: 1 pulls every vertex in to collapse_center (Mercury's parts do this
+// as they turn into balls of liquid)
+uniform float collapse : hint_range(0.0, 1.0) = 0.0;
+uniform vec3 collapse_center = vec3(0.0);
 uniform vec3 sky_top : source_color = vec3(0.1, 0.12, 0.3);
 uniform vec3 horizon : source_color = vec3(1.0, 0.62, 0.55);
 uniform vec3 ground : source_color = vec3(0.05, 0.06, 0.1);
 uniform vec3 grid_glow : source_color = vec3(0.2, 0.45, 1.0);
 
 void vertex() {
+	VERTEX = mix(VERTEX, collapse_center, collapse);
 	float t = TIME * (3.0 + agitation * 6.0);
 	vec3 p = VERTEX * 5.0;
 	// A wobble field over space rather than along the normals, so faceted shapes (whose

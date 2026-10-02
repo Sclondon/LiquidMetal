@@ -224,10 +224,10 @@ def key(obj, frame, rx=None, ry=None, rz=None, x=None, z=None):
 
 
 def ninja_arms(frame, sway=0.0, rx=-28, bob=0.0):
-    # Trailing back and a little out, like a ninja run (the chest's lean takes them further
+    # Trailing back and well out to the sides, like a ninja run (the chest's lean takes them further
     # back, so this is on top of that); bob lifts them, floating
     for tag, (arm, s) in arms.items():
-        key(arm, frame, rx=rx + sway * s, ry=s * 14, z=bob)
+        key(arm, frame, rx=rx + sway * s, ry=s * 40, z=bob)
 
 
 def run_keys():
