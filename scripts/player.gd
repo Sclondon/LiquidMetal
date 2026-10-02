@@ -24,6 +24,7 @@ var _wall_lost := 0.0 # seconds without touching the wall (a short grace before 
 var _wall_cooldown := 0.0
 var _wall_roll := 0.0 # the figure turned onto its side, smoothed
 var _wall_tween: Tween # the puddle splatted against something
+var _arm_puddles: Array[MeshInstance3D] = [] # the arms, splatting a beat after the body
 var _since_dodge := 99.0 # seconds since a dodge began (and which way: _dodge_dir)
 const JUMP_BUFFER := 0.2 # seconds a jump pressed in the air is kept for the landing
 # The slide: a quick hop, then SPLAT, the whole figure squashed flat into one puddle that skims
@@ -749,12 +750,39 @@ func _wall_puddle(point: Vector3, normal: Vector3) -> void:
 		_wall_tween.kill()
 	_wall_tween = create_tween()
 	# Slapped flat against it, spreading with a wobble, then sliding slowly down
-	_wall_tween.tween_property(_blob, "scale", Vector3(1.5, 0.22, 1.9), 0.35).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	_wall_tween.tween_property(_blob, "scale", Vector3(1.5, 0.12, 1.9), 0.35).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 	_wall_tween.parallel().tween_property(_blob, "global_position", centre + Vector3.DOWN * 0.45, RESPAWN_DELAY + 1.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	# ...then the arms, one after the other, slapping into the wall either side of it
+	if _arm_puddles.is_empty():
+		for i in 2:
+			var arm := MeshInstance3D.new()
+			arm.mesh = _blob.mesh
+			arm.material_override = _material
+			arm.top_level = true
+			arm.visible = false
+			add_child(arm)
+			_arm_puddles.append(arm)
+	for i in 2:
+		var arm := _arm_puddles[i]
+		var side := -1.0 if i == 0 else 1.0
+		var spot := centre + across * side * randf_range(0.75, 0.95) + Vector3.UP * randf_range(0.1, 0.35)
+		var tilt := Basis(flat, side * randf_range(0.3, 0.7)) * facing # stretched out at an angle
+		arm.global_transform = Transform3D(tilt.scaled_local(Vector3(0.05, 0.05, 0.05)), spot)
+		var delay := 0.12 + i * 0.09 + randf_range(0.0, 0.05)
+		var splat := create_tween()
+		splat.tween_interval(delay)
+		splat.tween_callback(func():
+			arm.visible = true
+			_droplets.burst(2, 0.6)
+		)
+		splat.tween_property(arm, "scale", Vector3(0.5, 0.09, 1.0), 0.3).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+		splat.tween_property(arm, "global_position", spot + Vector3.DOWN * 0.35, RESPAWN_DELAY + 0.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	_droplets.clear()
 
 
 func _respawn_at(spot: Vector3, facing: float) -> void:
+	for arm in _arm_puddles:
+		arm.visible = false
 	if _wall_tween:
 		_wall_tween.kill()
 		_wall_tween = null

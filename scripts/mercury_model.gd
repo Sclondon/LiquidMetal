@@ -118,11 +118,10 @@ func _ready() -> void:
 			stiffness = 140.0
 			deform = 2.2
 		elif view.name.begins_with("arm"):
-			# Free: hung on a soft, barely damped spring, so they fly about like the loose droplets
-			# and get pulled back in
-			stiffness = 14.0
-			damping = 0.09
-			reach = 0.75
+			# Loose and bouncy, but kept close to the body
+			stiffness = 40.0
+			damping = 0.2
+			reach = 0.22
 		elif view.name.begins_with("head"):
 			stiffness = 100.0
 		_stiffness.append(stiffness * randf_range(0.85, 1.15))

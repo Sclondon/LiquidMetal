@@ -63,14 +63,9 @@ func _process(delta: float) -> bool:
 		5:
 			if t > 3.4:
 				_check("RB dodges right", p.global_position.dot(p.right()) - x0 > 4.0)
-				_axis(JOY_AXIS_RIGHT_X, 0.0)
-				x0 = p.global_position.dot(p.right())
-				_axis(JOY_AXIS_RIGHT_X, -1.0)
 				step = 6
 		6:
 			if t > 3.8:
-				_check("a right-stick flick dodges", p.global_position.dot(p.right()) - x0 < -4.0)
-				_axis(JOY_AXIS_RIGHT_X, 0.0)
 				_button(JOY_BUTTON_X)
 				step = 7
 		7:

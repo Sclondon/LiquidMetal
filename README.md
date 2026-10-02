@@ -6,8 +6,8 @@ The menu has two modes: **ENDLESS RUN** (a lane that never ends and speeds up th
 ends the run; your best distance is saved) and **TEST AREA** (the playground; a splat rewinds you a moment).
 Esc (or TUNE → Menu, or Start on a gamepad) goes back to the menu.
 
-Gamepad: left stick turn, A / D-pad up jump, B / D-pad down duck, X dash, LB / RB (or D-pad left / right,
-or a flick of the right stick) dodge.
+Gamepad: left stick turn, right stick look around, A / D-pad up jump, B / D-pad down duck, X dash,
+LB / RB (or D-pad left / right) dodge.
 
 | Do | Touch / mouse | Keys |
 | --- | --- | --- |

@@ -5,11 +5,16 @@ extends Node
 ##   tap and hold the left/right half of the screen = turn that way.
 ##   the DASH button = a burst of speed.
 ## Keyboard: Space/W/Up jump, S/Down duck, Left/Right arrows dodge, A/D held turn, Shift/E dash.
-## Gamepad: left stick turn, A / D-pad up jump, B / D-pad down duck, X dash, LB / RB or D-pad
-## left / right dodge (a hard flick of the right stick sideways dodges too).
+## Gamepad: left stick turn, right stick look around (the camera), A / D-pad up jump, B / D-pad
+## down duck, X dash, LB / RB or D-pad left / right dodge. A stick only counts once it's been seen
+## resting in the middle (some devices report an axis stuck at full tilt).
 
 const STICK_DEADZONE := 0.2
-var _flicked := false # the right stick's been flicked and not yet let back to the middle
+
+## The right stick, -1..1 each way: the chase camera looks around with it
+var look := Vector2.ZERO
+
+var _centred := {} # "device:axis" -> true once that axis has been seen at rest
 
 signal jump
 signal duck
@@ -62,12 +67,6 @@ func _input(event: InputEvent) -> void:
 				dodge.emit(-1.0)
 			JOY_BUTTON_RIGHT_SHOULDER, JOY_BUTTON_DPAD_RIGHT:
 				dodge.emit(1.0)
-	elif event is InputEventJoypadMotion and event.axis == JOY_AXIS_RIGHT_X:
-		if not _flicked and absf(event.axis_value) > 0.7:
-			_flicked = true
-			dodge.emit(signf(event.axis_value))
-		elif absf(event.axis_value) < 0.3:
-			_flicked = false
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
 			KEY_SPACE, KEY_W, KEY_UP:
@@ -109,9 +108,22 @@ func _process(_delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_D):
 		keys += 1.0
 	var stick := 0.0
+	look = Vector2.ZERO
 	for pad in Input.get_connected_joypads():
-		var x := Input.get_joy_axis(pad, JOY_AXIS_LEFT_X)
-		if absf(x) > STICK_DEADZONE:
-			stick += signf(x) * (absf(x) - STICK_DEADZONE) / (1.0 - STICK_DEADZONE)
+		stick += _axis(pad, JOY_AXIS_LEFT_X)
+		look += Vector2(_axis(pad, JOY_AXIS_RIGHT_X), _axis(pad, JOY_AXIS_RIGHT_Y))
 	turn = clampf(held + keys + stick, -1.0, 1.0)
+	look = look.limit_length(1.0)
+
+
+## A stick axis past its dead zone (0 until it's been seen resting in the middle)
+func _axis(pad: int, axis: JoyAxis) -> float:
+	var value := Input.get_joy_axis(pad, axis)
+	var key := "%d:%d" % [pad, axis]
+	if absf(value) < STICK_DEADZONE:
+		_centred[key] = true
+		return 0.0
+	if not _centred.has(key):
+		return 0.0
+	return signf(value) * (absf(value) - STICK_DEADZONE) / (1.0 - STICK_DEADZONE)
 
