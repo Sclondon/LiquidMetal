@@ -187,7 +187,7 @@ func _on_splat() -> void:
 	var new_best := metres > _best
 	if new_best:
 		_best = metres
-		if get_tree().current_scene == self: # real play (a test script builds its own): keep it
+		if get_tree().get_script() == null: # real play (a test script runs its own SceneTree): keep it
 			_save_best(_best)
 	_input.set_process_input(false)
 	# Let the splat land first

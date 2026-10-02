@@ -15,6 +15,7 @@ var dash_button_down := false
 
 var body: CharacterBody3D # the enemy it drives
 var course: Node # has lane_plan: [{ z, kind, half? }]
+var target: CharacterBody3D # the player: chased from behind, then let catch up once passed
 
 var _done := {}
 var _target_x := 0.0
@@ -72,6 +73,14 @@ func _physics_process(_delta: float) -> void:
 					_target_until = oz - 2.0
 	if z < _target_until:
 		_target_x = 0.0
+	# Chasing: behind him, faster than him and lining up on him; once past him, slower (he can
+	# catch it up and dash through it), drifting back to the middle
+	var line := _target_x
+	if target and not target.dead:
+		var behind: bool = target.global_position.z < z
+		body.run_speed = target.run_speed * (1.35 if behind else 0.78)
+		if behind and z >= _target_until and z - target.global_position.z < 50.0:
+			line = clampf(target.global_position.x, -3.5, 3.5)
 	# Steer to hold its line down the lane (+turn is right; heading > 0 faces left)
-	var x := body.global_position.x - _target_x
+	var x := body.global_position.x - line
 	turn = clampf(-x * 0.35 + body.heading * 3.0, -1.0, 1.0)

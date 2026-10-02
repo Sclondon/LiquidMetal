@@ -80,8 +80,8 @@ func distance() -> float:
 
 
 func _physics_process(_delta: float) -> void:
-	if runner and with_enemies and distance() > 60.0 and enemies.size() < 3 and _rng.randf() < _delta * 0.25:
-		_spawn_enemy(runner.global_position.z - _rng.randf_range(70.0, 120.0))
+	if runner and with_enemies and distance() > 60.0 and enemies.size() < 2 and _rng.randf() < _delta * 0.2:
+		_spawn_enemy(runner.global_position.z + _rng.randf_range(22.0, 34.0)) # behind him: they chase
 	if runner == null:
 		return
 	_extend()
@@ -96,8 +96,6 @@ func _physics_process(_delta: float) -> void:
 			enemies.remove_at(i)
 		elif enemy.dead:
 			enemy.set_meta("dead_for", enemy.get_meta("dead_for", 0.0) + _delta)
-		else:
-			enemy.run_speed = runner.run_speed * 0.62
 	# Clear what's well behind
 	while not _chunks.is_empty() and _chunks[0].end > runner.global_position.z + BEHIND:
 		_chunks.pop_front().node.queue_free()
@@ -167,9 +165,12 @@ func _spawn_enemy(z: float) -> void:
 				clear = false
 		if clear:
 			break
-		z -= 6.0
+		z += 6.0 # (further back: they spawn behind him)
+	if runner and z - runner.global_position.z < 15.0:
+		return # (never right on top of him)
 	var ai := AiInput.new()
 	ai.course = self
+	ai.target = runner
 	var enemy := Runner.new()
 	enemy.input = ai
 	enemy.add_child(ai)
@@ -177,7 +178,7 @@ func _spawn_enemy(z: float) -> void:
 	ai.body = enemy
 	enemy.make_enemy()
 	enemy.place(Vector3(_rng.randf_range(-2.0, 2.0), 0.0, z), 0.0)
-	enemy.run_speed = runner.run_speed * 0.62 if runner else 9.0
+	enemy.run_speed = runner.run_speed * 1.35 if runner else 9.0
 	enemy.speed = enemy.run_speed
 	enemies.append(enemy)
 

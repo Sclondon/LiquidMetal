@@ -90,12 +90,10 @@ func _physics_process(delta: float) -> void:
 			if is_instance_valid(enemy):
 				enemy.queue_free()
 			enemies.remove_at(i)
-		elif not enemy.dead:
-			enemy.run_speed = runner.run_speed * 0.62
 	# Keep three on the lane ahead of him while he's on it
 	var z := runner.global_position.z
-	if enemies.size() < 3 and absf(runner.global_position.x) < LANE_WIDTH and z > LANE_END + 40.0:
-		_spawn_enemy(maxf(z - randf_range(25.0, 60.0), LANE_END + 10.0))
+	if enemies.size() < 2 and absf(runner.global_position.x) < LANE_WIDTH and z > LANE_END + 40.0 and z < start_position.z + 5.0:
+		_spawn_enemy(minf(z + randf_range(22.0, 34.0), HALF - 10.0)) # behind him: they chase
 
 
 func _spawn_enemy(z: float) -> void:
@@ -111,9 +109,14 @@ func _spawn_enemy(z: float) -> void:
 				clear = false
 		if clear:
 			break
-		z -= 6.0
+		z += 6.0 # (further back: they spawn behind him)
+	if runner and z - runner.global_position.z < 15.0:
+		return # (never right on top of him)
+	if z > HALF - 5.0:
+		return
 	var ai := AiInput.new()
 	ai.course = self
+	ai.target = runner
 	var enemy := Runner.new()
 	enemy.input = ai
 	enemy.add_child(ai)
@@ -121,7 +124,7 @@ func _spawn_enemy(z: float) -> void:
 	ai.body = enemy
 	enemy.make_enemy()
 	enemy.place(Vector3(randf_range(-1.5, 1.5), 0.0, z), 0.0)
-	enemy.run_speed = runner.run_speed * 0.62
+	enemy.run_speed = runner.run_speed * 1.35 if runner else 9.0
 	enemy.speed = enemy.run_speed
 	enemies.append(enemy)
 

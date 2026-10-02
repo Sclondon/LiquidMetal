@@ -55,6 +55,7 @@ If you edit the .blend by hand instead, export glTF (.glb) to `models/mercury.gl
 
     godot --headless --path . -s res://tests/wallrun_test.gd  # jump + dodge into the lane wall: wall run, jump off
     godot --headless --path . -s res://tests/endless_bot.gd  # bot plays endless mode to 1500 m: no splats
+    godot --headless --path . -s res://tests/chase_test.gd   # an enemy spawned behind closes in and lines up
 
     godot --headless --path . -s res://tests/lane_bot.gd     # bot runs 5 random lanes with the controls: 0 splats
     godot --headless --path . -s res://tests/touch_test.gd   # fake touches: hold turns, swipes jump/duck/dodge

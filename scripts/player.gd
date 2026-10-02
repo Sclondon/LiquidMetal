@@ -610,6 +610,13 @@ func _physics_process(delta: float) -> void:
 		var hit := get_slide_collision(i)
 		var normal := hit.get_normal()
 		var other := hit.get_collider()
+		if other != null and other != self and other.has_method("blow_up") and not other.dead and is_enemy and not other.is_enemy:
+			# An enemy that's caught him: unless he's punching, he's splatted
+			if other.is_dashing() or other._dash_kick > 0.0 or other._charging:
+				blow_up(velocity)
+			else:
+				other._splat(hit.get_position(), -normal, self)
+			return
 		if other != null and other != self and other.has_method("blow_up") and not other.dead:
 			if is_dashing() or _dash_kick > 0.0 or _charging:
 				# Dashed (or about to) straight through: it bursts apart
