@@ -535,11 +535,15 @@ func _process(delta: float) -> void:
 		_trail.step(under, ground, 0.9, delta)
 	else:
 		var contacts := _figure.feet()
-		if _land_hold > 0.0:
-			# The superhero landing: a third track where the hand's down on the floor
-			var hand := _figure.hand()
-			contacts.append(Vector3(hand.x, minf(hand.y, global_position.y + 0.05), hand.z))
-		_trail.step(contacts, ground, 0.16, delta)
+		var width := 0.16
+		if _land_hold > 0.0 and is_on_floor():
+			# The superhero landing: both feet and the hand planted, three tracks dragged along the
+			# floor (pinned down: in the pose they hover just off it, which would break them up)
+			contacts.append(_figure.hand())
+			for c in contacts.size():
+				contacts[c].y = global_position.y
+			width = 0.24
+		_trail.step(contacts, ground, width, delta)
 
 	# The puddle swells as Mercury sinks into it
 	# (once the parts' puddles have slid in together)

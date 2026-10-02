@@ -5,7 +5,14 @@ extends Node3D
 ## a held pose). Faces -Z.
 
 const MODEL_SCALE := 0.66 # the .glb is ~3.1 m to the horn tip; this makes it ~2 m
-const RUN_PACE := 70.0 # run speed (m/s) at which the stride plays at its authored rate: at 14 m/s a cycle takes 6 s
+# The stride: the legs always pump at the same quick rate; what changes with speed is how long
+# each lunge is held (the run animation lunges at 0 s and 0.6 s of its 1.2 s)
+const PUMP_RATE := 1.6 # the animation's speed between lunges
+const LUNGES := [0.0, 0.6]
+const LUNGE_WINDOW := Vector2(-0.03, 0.06) # around each lunge: the stretch that's held
+const HOLD_SLOW := 0.06 # held lunge length (s) from a standstill...
+const HOLD_FAST := 0.9 # ...up to this at TOP_SPEED
+const TOP_SPEED := 26.0
 const BLEND := 0.08 # seconds to blend between run and jump: snappy
 
 var material: Material
@@ -272,16 +279,25 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		_pose = pose
 		_anim.play(pose, 0.04 if pose == "land" else BLEND) # slammed into
 	if pose == "run":
-		# Long, slow strides at speed; quick hard pumps when getting up to it; easing right off to a
-		# glide while leaning into a turn
-		var rate := maxf(speed, 1.0) / RUN_PACE + effort * 1.4
-		_anim.speed_scale = rate * (1.0 - absf(steer) * 0.8)
+		# A quick pump of the legs into each lunge, then the lunge held, gliding: barely at all from
+		# a standstill, longer and longer the faster it goes. Turning, it steps into the turn (a
+		# touch quicker) rather than gliding.
+		var fast := clampf((speed - 4.0) / (TOP_SPEED - 4.0), 0.0, 1.0) * (1.0 - effort * 0.5) * (1.0 - absf(steer) * 0.6)
+		var hold := lerpf(HOLD_SLOW, HOLD_FAST, fast)
+		var rate := PUMP_RATE * (1.0 + absf(steer) * 0.3)
+		var at := fmod(_anim.current_animation_position, _anim.current_animation_length)
+		for lunge in LUNGES:
+			var d: float = at - lunge
+			if d > LUNGE_WINDOW.x and d < LUNGE_WINDOW.y:
+				rate = (LUNGE_WINDOW.y - LUNGE_WINDOW.x) / hold # crawl through it: held for `hold` s
+		_anim.speed_scale = rate
 	else:
 		_anim.speed_scale = 1.0
 	for i in _splash.size():
 		_splash[i] = move_toward(_splash[i], 0.0, _delta * 1.6)
 		_part_materials[i].set_shader_parameter("splash", _splash[i])
-	_model.rotation.z = -steer * 0.6 # leaning right into turns
+	# Into a turn: the body swung round to face into it (stepping that way) and leaning into it
+	_model.rotation = Vector3(0.0, -steer * 0.4, -steer * 0.5)
 	_bounce(_delta)
 
 
