@@ -534,7 +534,12 @@ func _process(delta: float) -> void:
 		var under: Array[Vector3] = [global_position]
 		_trail.step(under, ground, 0.9, delta)
 	else:
-		_trail.step(_figure.feet(), ground, 0.16, delta)
+		var contacts := _figure.feet()
+		if _land_hold > 0.0:
+			# The superhero landing: a third track where the hand's down on the floor
+			var hand := _figure.hand()
+			contacts.append(Vector3(hand.x, minf(hand.y, global_position.y + 0.05), hand.z))
+		_trail.step(contacts, ground, 0.16, delta)
 
 	# The puddle swells as Mercury sinks into it
 	# (once the parts' puddles have slid in together)

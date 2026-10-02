@@ -1,5 +1,5 @@
 extends MeshInstance3D
-## The two tracks Mercury's feet leave: a ribbon of liquid metal on the floor under each foot
+## The tracks Mercury leaves (one per contact point: two feet, plus a hand in the superhero landing): a ribbon of liquid metal on the floor under each foot
 ## for as long as it's down, broken when it lifts and started again where it lands, tapering
 ## and fading away behind. World space. The player calls step() every frame.
 
@@ -9,8 +9,8 @@ const CONTACT := 0.14 # a foot this close to the floor is touching it
 
 var material: Material
 
-var _strips: Array = [[], []] # per foot: strips, each an Array of { pos, age, width }
-var _down: Array[bool] = [false, false]
+var _strips: Array = [] # per contact point: strips, each an Array of { pos, age, width }
+var _down: Array[bool] = []
 var _mesh := ImmediateMesh.new()
 
 
@@ -23,7 +23,13 @@ func _ready() -> void:
 
 ## feet: where each foot is; floor: the height of the ground under them (NAN: in the air)
 func step(feet: Array[Vector3], floor: float, width: float, delta: float) -> void:
-	for f in mini(feet.size(), 2):
+	while _strips.size() < feet.size():
+		_strips.append([])
+		_down.append(false)
+	for f in _strips.size():
+		if f >= feet.size():
+			_down[f] = false # this contact point isn't touching now
+			continue
 		var foot := feet[f]
 		var touching := not is_nan(floor) and foot.y - floor < CONTACT
 		var strips: Array = _strips[f]
@@ -43,12 +49,13 @@ func step(feet: Array[Vector3], floor: float, width: float, delta: float) -> voi
 
 ## Every foot off the ground: the next touch starts a fresh piece of track
 func lift() -> void:
-	_down = [false, false]
+	for f in _down.size():
+		_down[f] = false
 
 
 func clear() -> void:
-	_strips = [[], []]
-	_down = [false, false]
+	_strips = []
+	_down = []
 	_mesh.clear_surfaces()
 
 

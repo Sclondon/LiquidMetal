@@ -44,6 +44,8 @@ var _splash: Array[float] = []
 # The tips of the shins (left, right): where the feet are
 var _feet: Array[MeshInstance3D] = []
 var _foot_tips: Array[Vector3] = []
+var _hand: MeshInstance3D # the arm that goes down to the floor in the superhero landing
+var _hand_tip := Vector3.ZERO
 var _last_root := Vector3.ZERO
 var _root_velocity := Vector3.ZERO
 var _anim: AnimationPlayer
@@ -84,6 +86,9 @@ func _ready() -> void:
 		view.mesh = null
 		view.add_child(jiggle)
 		_jiggles.append(jiggle)
+		if view.name == "arm_R":
+			_hand = jiggle
+			_hand_tip = Vector3(0.0, box.position.y, 0.0)
 		if view.name.begins_with("shin"):
 			var tip := Vector3(0.0, box.position.y, 0.0) # the point at the bottom
 			if view.name.ends_with("L"):
@@ -163,6 +168,11 @@ func feet() -> Array[Vector3]:
 	for i in _feet.size():
 		spots.append(_feet[i].global_transform * _foot_tips[i])
 	return spots
+
+
+## Where the landing hand's tip is, in the world
+func hand() -> Vector3:
+	return _hand.global_transform * _hand_tip if _hand else global_position
 
 
 ## Something just joined this part (a droplet back, the balls setting): it ripples
