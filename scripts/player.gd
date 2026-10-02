@@ -13,9 +13,12 @@ const DODGE_DIST := 4.5
 const DODGE_TIME := 0.2
 const DUCK_TIME := 0.75
 const JUMP_BUFFER := 0.2 # seconds a jump pressed in the air is kept for the landing
-const SLIDE_LEAD := 0.28 # seconds in the slide pose (hop included) before melting into the puddle
-const HOP_TIME := 0.24 # the hop into a slide (just the figure: the collider stays low)
-const HOP_HEIGHT := 0.45
+# The slide: a quick hop, then SPLAT, the whole figure squashed flat into one puddle that skims
+# along the floor, wobbling, eyes glinting at the front; then it pops back up out of it, tall
+const HOP_TIME := 0.16 # the hop into a slide (just the figure: the collider is already low)
+const HOP_HEIGHT := 0.32
+const SPLAT_RATE := 11.0 # figure -> puddle: flattens in about a tenth of a second
+const POP_RATE := 7.0 # puddle -> figure
 # The acrobatics for each move, one picked at random each time (never the same twice running):
 # [axis in Mercury's frame, turns (negative: the other way; a dodge's direction flips it)]
 const TRICKS := {
@@ -85,6 +88,9 @@ var _spawn := Transform3D.IDENTITY
 var _shape := CapsuleShape3D.new()
 var _collider := CollisionShape3D.new()
 var _blob := MeshInstance3D.new() # the puddle it melts into
+var _puddle_eyes: Array[MeshInstance3D] = []
+var _puddled := false # flat as a puddle (past the splat)
+var _clock := 0.0
 var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
 var _figure_material := ShaderMaterial.new()
@@ -133,6 +139,20 @@ func _ready() -> void:
 	_blob.material_override = _material
 	_blob.visible = false
 	add_child(_blob)
+	# Its eyes glint at the front of the puddle
+	var eye_material := StandardMaterial3D.new()
+	eye_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	eye_material.albedo_color = Color(1.0, 0.1, 0.08)
+	for side in [-1.0, 1.0]:
+		var eye := MeshInstance3D.new()
+		var eye_mesh := BoxMesh.new()
+		eye_mesh.size = Vector3(0.12, 0.025, 0.04)
+		eye.mesh = eye_mesh
+		eye.material_override = eye_material
+		eye.visible = false
+		eye.set_meta("side", side)
+		add_child(eye)
+		_puddle_eyes.append(eye)
 
 	_figure_material.shader = _material.shader
 	_figure_material.set_shader_parameter("ripple", 0.35) # facets: only a shimmer
@@ -172,7 +192,7 @@ func _ready() -> void:
 	_droplets.rejoined.connect(func(part): _figure.ripple(part, 0.7))
 	_figure.pooled.connect(func(): _puddle_splash = 1.0)
 	_material.set_shader_parameter("splash_up", true)
-	_material.set_shader_parameter("splash_strength", 0.5) # the puddle's squashed flat: ripple hard
+	_material.set_shader_parameter("splash_strength", 0.1)
 
 	_trail.material = _figure_material
 	add_child(_trail)
@@ -273,7 +293,8 @@ func set_real_reflections(on: bool) -> void:
 	_probe.visible = on
 	var amount := 1.0 if on else 0.0
 	_figure.set_shader("real_reflection", amount)
-	_material.set_shader_parameter("real_reflection", amount)
+	# (only partly for the puddle: lying flat it would mirror nothing but the dark floor and vanish)
+	_material.set_shader_parameter("real_reflection", amount * 0.35)
 
 
 ## Mercury and everything it's made of on its own render layer (the probe doesn't see it)
@@ -406,10 +427,7 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= GRAVITY * (FAST_FALL if _fast_fall else 1.0) * delta
 	dash_cooldown = maxf(dash_cooldown - delta, 0.0)
 	# Builds back up to running speed (sliding as a puddle and landing hard slow it)
-	if ducking and _melt > 0.5:
-		speed = move_toward(speed, run_speed * 0.75, ACCELERATION * delta)
-	else:
-		speed = move_toward(speed, run_speed, ACCELERATION * delta)
+	speed = move_toward(speed, run_speed, ACCELERATION * delta) # (a slide keeps its speed)
 	var going := speed
 	if _dash_left > 0.0:
 		going *= DASH_BOOST
@@ -474,13 +492,24 @@ func _process(delta: float) -> void:
 	if dead:
 		return
 
-	# Melts down fast (ducking has to be quick), pulls itself back up a little slower
-	# A duck slides first, then melts
+	_clock += delta
+	# The slide: hop, then splat flat; up again when the duck's done
 	_slide_clock = _slide_clock + delta if ducking else 0.0
-	var puddle := ducking and _slide_clock > SLIDE_LEAD
-	# (each part melts in turn, so this runs over ~0.4 s)
-	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (3.0 if puddle else 3.0))
-	var melt := smoothstep(0.0, 1.0, _melt)
+	var puddle := ducking and _slide_clock > HOP_TIME * 0.8
+	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (SPLAT_RATE if puddle else POP_RATE))
+	var melt := _melt * _melt # eases in: slow to start, then slapped flat
+	if _melt > 0.7 and not _puddled:
+		# SPLAT: spray thrown out all round, the puddle kicked wide (it overshoots and wobbles back)
+		_puddled = true
+		_land_spray.restart()
+		_land_skid.restart()
+		_pool_velocity += 5.0
+		_puddle_splash = 1.0
+	elif _melt < 0.3 and _puddled:
+		# Popping back up out of it: stretched tall, and a few drops flung off
+		_puddled = false
+		_squash = -0.45
+		_droplets.burst(5, 1.2)
 
 	# Mercury: stretched by vertical speed in the air, squished on landing, flattening as it melts
 	var stretch := Vector3.ONE
@@ -490,7 +519,7 @@ func _process(delta: float) -> void:
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
 	if is_dashing():
 		stretch *= Vector3(0.88, 0.92, 1.35) # drawn out along the dash
-	_figure.visible = melt < 0.99
+	_figure.visible = _melt < 0.92
 	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself), and
 	# flipping or twirling about its middle during a move
 	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
@@ -504,8 +533,11 @@ func _process(delta: float) -> void:
 	if _hop_left > 0.0:
 		_hop_left = maxf(_hop_left - delta, 0.0)
 		hop = sin(PI * (1.0 - _hop_left / HOP_TIME)) * HOP_HEIGHT
-	_figure.transform = Transform3D(turn * Basis.from_scale(stretch.lerp(Vector3.ONE, melt)), middle - turn * middle + Vector3.UP * hop)
-	_figure.set_puddle(_melt) # the parts melt into puddles one by one
+	# Splatting: squashed flat and spread wide, about its feet (so it stays on the floor)
+	var flat := Vector3(1.0 + melt * 1.1, 1.0 - melt * 0.94, 1.0 + melt * 1.5)
+	var body := turn * Basis.from_scale(stretch * flat)
+	var pivot := middle.lerp(Vector3.ZERO, melt)
+	_figure.transform = Transform3D(body, pivot - body * pivot + Vector3.UP * hop * (1.0 - melt))
 	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
 	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
@@ -532,7 +564,7 @@ func _process(delta: float) -> void:
 	if melt > 0.5:
 		# A puddle smears one wide track along under its middle
 		var under: Array[Vector3] = [global_position]
-		_trail.step(under, ground, 0.9, delta)
+		_trail.step(under, ground, 0.7, delta)
 	else:
 		var contacts := _figure.feet()
 		var width := 0.16
@@ -545,20 +577,34 @@ func _process(delta: float) -> void:
 			width = 0.24
 		_trail.step(contacts, ground, width, delta)
 
-	# The puddle swells as Mercury sinks into it
-	# (once the parts' puddles have slid in together)
-	# The puddle swells on an underdamped spring: it overshoots and wobbles as it fills and empties
-	var pooled_target := smoothstep(0.55, 1.0, _melt)
-	_pool_velocity += ((pooled_target - _pool_size) * 260.0 - _pool_velocity * 9.0) * delta
-	_pool_size = maxf(_pool_size + _pool_velocity * delta, 0.0)
-	var pooled := _pool_size
-	var wobble := (_pool_size - pooled_target) * 1.8 # past full: thinner and wider; short: taller
+	# The puddle: one long drop of metal skimming along, on a wobbly spring (it overshoots on the
+	# splat and as it gathers back up), stretched out the faster it goes
+	var pooled_target := 1.0 if _puddled else 0.0
+	# (stepped in small fixed slices: a stiff spring blows up on a long frame otherwise)
+	var left := delta
+	while left > 0.0:
+		var step := minf(left, 1.0 / 240.0)
+		left -= step
+		_pool_velocity += ((pooled_target - _pool_size) * 300.0 - _pool_velocity * 10.0) * step
+		_pool_size = maxf(_pool_size + _pool_velocity * step, 0.0)
+	var pooled := minf(_pool_size, 1.3)
+	var wobble := clampf((_pool_size - pooled_target) * 1.2, -0.5, 0.5) # past full: thinner and wider; short: taller
+	var ripple := sin(_clock * 15.0) * 0.05 * pooled
 	_blob.visible = pooled > 0.03
 	_puddle_splash = move_toward(_puddle_splash, 0.0, delta * 1.2)
 	_material.set_shader_parameter("splash", _puddle_splash)
-	_blob.scale = Vector3(1.7 * (1.0 + wobble * 0.5), 0.3 * (1.0 - wobble), 1.7 * (1.0 + wobble * 0.5)) * maxf(pooled, 0.01)
+	var long := 1.0 + clampf(speed / 20.0, 0.0, 1.0) * 0.8
+	_blob.scale = Vector3(1.25 * (1.0 + wobble * 0.5 + ripple), 0.32 * maxf(1.0 - wobble - ripple, 0.3), 1.4 * long * (1.0 + wobble * 0.3 - ripple)) * maxf(pooled, 0.01)
 	_blob.position.y = BLOB_RADIUS * _blob.scale.y
 	_blob.rotation = Vector3(0.0, heading, lean)
+	# Eyes peeking out of the front of it
+	for eye in _puddle_eyes:
+		eye.visible = pooled > 0.6
+		var side: float = eye.get_meta("side")
+		var front := BLOB_RADIUS * _blob.scale.z * 0.62
+		var spot := Vector3(side * 0.09, BLOB_RADIUS * _blob.scale.y * 1.7, -front)
+		eye.position = Basis(Vector3.UP, heading) * spot
+		eye.rotation = Vector3(0.0, heading + side * 0.3, -side * 0.35)
 
 
 ## Landing: a splash of metal particles thrown up from the feet and fanned out along the floor
@@ -632,6 +678,8 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	dead = false
 	# Pulls itself back together out of a puddle
 	_melt = 1.0
+	_puddled = true
+	_pool_size = 1.0
 	speed = 0.0 # from a standstill: pumping hard
 	_dash_left = 0.0
 	dash_cooldown = 0.0

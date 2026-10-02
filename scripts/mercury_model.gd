@@ -112,10 +112,11 @@ func _ready() -> void:
 			stiffness = 140.0
 			deform = 2.2
 		elif view.name.begins_with("arm"):
-			# Loose: soft, springy and free to swing well out of the pose
-			stiffness = 28.0
-			damping = 0.16
-			reach = 0.35
+			# Free: hung on a soft, barely damped spring, so they fly about like the loose droplets
+			# and get pulled back in
+			stiffness = 14.0
+			damping = 0.09
+			reach = 0.75
 		elif view.name.begins_with("head"):
 			stiffness = 100.0
 		_stiffness.append(stiffness * randf_range(0.85, 1.15))
@@ -280,16 +281,20 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		_anim.play(pose, 0.04 if pose == "land" else BLEND) # slammed into
 	if pose == "run":
 		# A quick pump of the legs into each lunge, then the lunge held, gliding: barely at all from
-		# a standstill, longer and longer the faster it goes. Turning, it steps into the turn (a
-		# touch quicker) rather than gliding.
-		var fast := clampf((speed - 4.0) / (TOP_SPEED - 4.0), 0.0, 1.0) * (1.0 - effort * 0.5) * (1.0 - absf(steer) * 0.6)
+		# a standstill, longer and longer the faster it goes. Turning, it steps (quickly) into a lunge
+		# and holds it for as long as the turn lasts.
+		var turning := absf(steer) > 0.3
+		var fast := clampf((speed - 4.0) / (TOP_SPEED - 4.0), 0.0, 1.0) * (1.0 - effort * 0.5)
 		var hold := lerpf(HOLD_SLOW, HOLD_FAST, fast)
-		var rate := PUMP_RATE * (1.0 + absf(steer) * 0.3)
+		# Near a standstill the legs pump much faster, working up to speed
+		var rate := PUMP_RATE * (1.0 + absf(steer) * 0.3 + effort * 2.5)
 		var at := fmod(_anim.current_animation_position, _anim.current_animation_length)
 		for lunge in LUNGES:
 			var d: float = at - lunge
 			if d > LUNGE_WINDOW.x and d < LUNGE_WINDOW.y:
 				rate = (LUNGE_WINDOW.y - LUNGE_WINDOW.x) / hold # crawl through it: held for `hold` s
+				if turning and d > 0.0:
+					rate = 0.0 # into the turn: held right there till it straightens out
 		_anim.speed_scale = rate
 	else:
 		_anim.speed_scale = 1.0
@@ -304,6 +309,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 func _bounce(delta: float) -> void:
 	if delta <= 0.0:
 		return
+	delta = minf(delta, 1.0 / 30.0) # a long frame would throw the springs out
 	_clock += delta
 	var root := global_position
 	if _springs_ready:
