@@ -123,7 +123,11 @@ var _pool_offset := Vector3.ZERO # where the puddle sits under him
 var _look_clock := 0.0
 var _bounce_t := 9.0
 var _dash_kick := 0.0
-var _punch := 0.0 # the dash's punch: 0 .. 1 arm out # seconds since snapping back up out of the puddle
+var _punch := 0.0
+var _last_velocity := Vector3.ZERO
+# A crash: blobs of him flung on with his momentum, splatting where they hit
+var _crash_balls: Array[Dictionary] = [] # { view, velocity, radius }
+var _wall_splats: Array[Dictionary] = [] # { pos, radius, drip } on the wall surface # the dash's punch: 0 .. 1 arm out # seconds since snapping back up out of the puddle
 var _clock := 0.0
 var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
@@ -523,6 +527,7 @@ func _physics_process(delta: float) -> void:
 		ground -= _wall_normal * 2.0 # pressed against the wall, to stay on it
 	velocity.x = ground.x
 	velocity.z = ground.z
+	_last_velocity = velocity
 	move_and_slide()
 
 	# Head-on into something: splat (glancing blows just slide along it). A wall alongside, in
@@ -594,8 +599,10 @@ func _physics_process(delta: float) -> void:
 	if ducking:
 		_duck_left -= delta
 		var held: bool = input.duck_held()
-		if _duck_left <= 0.0 and not held:
-			_set_ducking(false)
+		if (_duck_left <= 0.0 and not held) or absf(input.turn) > 0.5:
+			_set_ducking(false) # (turning: up out of it, back to skating)
+			if not ducking:
+				_duck_left = 0.0
 
 	_sample_clock += delta
 	if on_floor and _sample_clock >= 0.1:
@@ -610,8 +617,10 @@ func _process(delta: float) -> void:
 	_agitation = move_toward(_agitation, absf(steer) * 0.35, delta * 2.0)
 	_material.set_shader_parameter("agitation", _agitation)
 	_figure_material.set_shader_parameter("agitation", _agitation)
+	_update_crash(delta)
 	_feed_wall_surface()
 	if dead:
+		_feed_surface() # (the crash's floor splats)
 		return
 
 	_clock += delta
@@ -718,9 +727,20 @@ func _process(delta: float) -> void:
 		_droplets.burst(randi_range(1, 2), 0.7)
 
 	# Splashing at its feet while it runs on the ground, and a track under each foot
-	var running := is_on_floor() and melt < 0.5 and not dead
+	var running := is_on_floor() and not dead and _sink < 0.5
 	var foot_spots := _figure.feet()
-	for f in mini(foot_spots.size(), _foot_splash.size()):
+	if melt > 0.5:
+		# Sliding: spraying from the front of each foot and where the hands drag on the floor
+		foot_spots.append(_figure.hand("L"))
+		foot_spots.append(_figure.hand("R"))
+	while _foot_splash.size() < foot_spots.size():
+		var extra: CPUParticles3D = _foot_splash[0].duplicate()
+		add_child(extra)
+		_foot_splash.append(extra)
+	for f in _foot_splash.size():
+		if f >= foot_spots.size():
+			_foot_splash[f].emitting = false
+			continue
 		var spray := _foot_splash[f]
 		var at := to_local(foot_spots[f])
 		spray.position = Vector3(at.x, 0.05, at.z)
@@ -904,10 +924,88 @@ func _look_around(delta: float) -> void:
 	_figure.look_point = best
 
 
-## The crash splat's liquid surface on the wall: the body's puddle and the arms', melted together
+## A crash: every part of him (and a few more besides) flies on as a blob of liquid with the
+## speed he had, and splats on whatever it hits: the wall's splats melt together on it, and any
+## that drop to the floor join the floor's puddles
+func _crash_burst(point: Vector3, normal: Vector3) -> void:
+	var flat := Vector3(normal.x, 0.0, normal.z).normalized()
+	var across := flat.cross(Vector3.UP).normalized()
+	_wall_surface.global_transform = Transform3D(Basis(across, flat, across.cross(flat)), point + flat * 0.01)
+	_wall_surface.visible = true
+	_wall_splats.clear()
+	_blob.visible = false
+	var starts: Array[Vector3] = []
+	for part in _figure.parts():
+		starts.append(part.global_position)
+	for k in 8:
+		starts.append(global_position + Vector3(randf_range(-0.4, 0.4), randf_range(0.2, 1.6), randf_range(-0.4, 0.4)))
+	var ball_mesh := SphereMesh.new()
+	ball_mesh.radius = 1.0
+	ball_mesh.height = 2.0
+	ball_mesh.radial_segments = 12
+	ball_mesh.rings = 6
+	for at in starts:
+		var view := MeshInstance3D.new()
+		view.mesh = ball_mesh
+		view.material_override = _figure_material
+		view.top_level = true
+		add_child(view)
+		var radius := randf_range(0.09, 0.2)
+		view.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * radius), at - flat * 0.3)
+		var fling := _last_velocity * randf_range(0.6, 1.05) + Vector3(randf_range(-2.0, 2.0), randf_range(-0.5, 2.5), randf_range(-2.0, 2.0))
+		_crash_balls.append({ view = view, velocity = fling, radius = radius })
+
+
+func _update_crash(delta: float) -> void:
+	var space := get_world_3d().direct_space_state
+	for i in range(_crash_balls.size() - 1, -1, -1):
+		var ball: Dictionary = _crash_balls[i]
+		var view: MeshInstance3D = ball.view
+		ball.velocity += Vector3.DOWN * GRAVITY * 0.7 * delta
+		var from := view.global_position
+		var to: Vector3 = from + ball.velocity * delta
+		var ray := PhysicsRayQueryParameters3D.create(from, to)
+		ray.exclude = [get_rid()]
+		var hit := space.intersect_ray(ray)
+		var v: Vector3 = ball.velocity
+		var stretch := clampf(v.length() * 0.04, 0.0, 0.8)
+		if v.length() > 0.1:
+			view.look_at(from + v, Vector3.UP if absf(v.normalized().y) < 0.98 else Vector3.RIGHT)
+		view.scale = Vector3(1.0 - stretch * 0.3, 1.0 - stretch * 0.3, 1.0 + stretch) * float(ball.radius)
+		if hit.is_empty():
+			view.global_position = to
+			continue
+		# Splat
+		var n: Vector3 = hit.normal
+		var r: float = ball.radius * randf_range(2.2, 3.2)
+		if absf(n.y) < 0.6:
+			_wall_splats.append({ pos = hit.position, radius = r, grow = 0.0, drip = randf_range(0.05, 0.35) })
+		else:
+			_dab(hit.position, -1, 0.0, r * 1.8, Vector3.UP, 2.5)
+		view.queue_free()
+		_crash_balls.remove_at(i)
+	for splat in _wall_splats:
+		splat.grow = minf(splat.grow + delta * 6.0, 1.0)
+		splat.pos += Vector3.DOWN * splat.drip * delta # sliding slowly down the wall
+
+
+## The crash's liquid surface on the wall: every blob that hit it, melted together
 func _feed_wall_surface() -> void:
 	if not _wall_surface.visible:
 		return
+	var inverse := _wall_surface.global_transform.affine_inverse()
+	var blobs: Array[Vector4] = []
+	for splat in _wall_splats:
+		var at := inverse * (splat.pos as Vector3)
+		var grow: float = splat.grow
+		var r: float = splat.radius * (1.0 - pow(1.0 - grow, 3.0)) # slapped out fast
+		if r > 0.01 and blobs.size() < 32:
+			blobs.append(Vector4(at.x, at.z, 0.0, r))
+	_wall_surface_material.set_shader_parameter("blobs", blobs)
+	_wall_surface_material.set_shader_parameter("count", blobs.size())
+
+
+func _old_wall_surface_unused() -> void:
 	var inverse := _wall_surface.global_transform.affine_inverse()
 	var blobs: Array[Vector4] = []
 	var splats: Array[MeshInstance3D] = [_blob]
@@ -1064,7 +1162,7 @@ func _splat(point := Vector3.INF, normal := Vector3.ZERO) -> void:
 		_blob.visible = false
 		_splash.restart()
 	else:
-		_wall_puddle(point, normal)
+		_crash_burst(point, normal)
 	_droplets.clear()
 	_trail.lift() # break the tracks where it splatted
 	for spray in _foot_splash:
@@ -1174,6 +1272,10 @@ func _on_surface(centre: Vector3, wanted: Vector3, normal: Vector3) -> Vector3:
 
 
 func _respawn_at(spot: Vector3, facing: float) -> void:
+	for ball in _crash_balls:
+		ball.view.queue_free()
+	_crash_balls.clear()
+	_wall_splats.clear()
 	_wall_surface.visible = false
 	_blob.layers = 0
 	for arm in _arm_puddles:
