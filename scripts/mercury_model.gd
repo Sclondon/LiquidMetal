@@ -49,6 +49,8 @@ var _springs_ready := false
 var _clock := 0.0
 var _head_jiggle: Node3D
 var _arm_pump := 0.0
+var _turn_sign := 0.0 # which way it last turned
+var _switch_step := 0.0 # seconds left of stepping across after turning the other way
 var _splash: Array[float] = []
 # The tips of the shins (left, right): where the feet are
 var _feet: Array[MeshInstance3D] = []
@@ -241,7 +243,7 @@ func _shape_balls() -> void:
 	var middle := global_transform * Vector3(0.0, 0.9, 0.0)
 	var floor := global_position
 	var size := global_basis.get_scale().x * MODEL_SCALE
-	var hide_eyes := false
+	var hide_eyes := jelly > 0.35 # (the head's surface wobbles off them as jelly)
 	for i in _parts.size():
 		# The slide's melt goes part by part, head first: each has its own stretch of it
 		var start := _puddle_order[i] * 0.5
@@ -297,6 +299,13 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		# a standstill, longer and longer the faster it goes. Turning, it steps (quickly) into a lunge
 		# and holds it for as long as the turn lasts.
 		var turning := absf(steer) > 0.3
+		# Switching from one turn to the other: let go of the held lunge and step across into the
+		# other leg's
+		_switch_step = maxf(_switch_step - _delta, 0.0)
+		if turning:
+			if _turn_sign != 0.0 and signf(steer) != _turn_sign:
+				_switch_step = 0.35
+			_turn_sign = signf(steer)
 		var fast := clampf((speed - 4.0) / (TOP_SPEED - 4.0), 0.0, 1.0) * (1.0 - effort * 0.5)
 		var hold := lerpf(HOLD_SLOW, HOLD_FAST, fast)
 		# Near a standstill the legs pump much faster, working up to speed
@@ -306,7 +315,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			var d: float = at - lunge
 			if d > LUNGE_WINDOW.x and d < LUNGE_WINDOW.y:
 				rate = (LUNGE_WINDOW.y - LUNGE_WINDOW.x) / hold # crawl through it: held for `hold` s
-				if turning and d > 0.0:
+				if turning and d > 0.0 and _switch_step <= 0.0:
 					rate = 0.0 # into the turn: held right there till it straightens out
 		_anim.speed_scale = rate
 	else:

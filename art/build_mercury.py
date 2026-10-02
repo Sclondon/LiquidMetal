@@ -179,7 +179,7 @@ for s in (-1, 1):
 arms = {}
 for s, tag in ((-1, "L"), (1, "R")):
     bm = bmesh.new()
-    add_shard(bm, [(-0.22, 0.28, 0.18), (-0.04, 0.13, 0.11)], top=None, bottom=-0.8)
+    add_shard(bm, [(-0.3, 0.38, 0.24), (-0.05, 0.17, 0.14)], top=None, bottom=-1.08)
     arm = mesh_object(f"arm_{tag}", bm, (s * 0.46, 0, 0.42), chest)
     arms[tag] = (arm, s)
 

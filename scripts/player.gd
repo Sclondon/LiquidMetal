@@ -561,17 +561,15 @@ func _process(delta: float) -> void:
 	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (SPLAT_RATE if puddle else POP_RATE))
 	var melt := _melt * _melt # eases in: slow to start, then slapped flat
 	if _melt > 0.7 and not _puddled:
-		# SPLAT: spray thrown out all round, the puddle kicked wide (it overshoots and wobbles back)
+		# The puddle spreads out under him (with a little overshoot), while he holds the dive
 		_puddled = true
-		_land_spray.restart()
-		_land_skid.restart()
-		_pool_velocity += 5.0
+		_pool_velocity += 2.5
 		_puddle_splash = 1.0
 	elif _melt < 0.3 and _puddled:
-		# Popping back up out of it: stretched tall, and a few drops flung off
+		# Back up out of the dive, a few drops flung off
 		_puddled = false
-		_squash = -0.45
-		_droplets.burst(5, 1.2)
+		_squash = -0.2
+		_droplets.burst(3, 0.8)
 
 	# Mercury: stretched by vertical speed in the air, squished on landing, flattening as it melts
 	var stretch := Vector3.ONE
@@ -581,7 +579,7 @@ func _process(delta: float) -> void:
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
 	if is_dashing():
 		stretch *= Vector3(0.88, 0.92, 1.35) # drawn out along the dash
-	_figure.visible = _melt < 0.92
+	_figure.visible = true
 	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself), and
 	# flipping or twirling about its middle during a move
 	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
@@ -599,7 +597,7 @@ func _process(delta: float) -> void:
 		_hop_left = maxf(_hop_left - delta, 0.0)
 		hop = sin(PI * (1.0 - _hop_left / HOP_TIME)) * HOP_HEIGHT
 	# Splatting: squashed flat and spread wide, about its feet (so it stays on the floor)
-	var flat := Vector3(1.0 + melt * 1.1, 1.0 - melt * 0.94, 1.0 + melt * 1.5)
+	var flat := Vector3(1.0, 1.0 - melt * 0.25, 1.0) # held low in the dive
 	var body := turn * Basis.from_scale(stretch * flat)
 	var pivot := middle.lerp(Vector3.ZERO, maxf(melt, absf(_wall_roll) / 1.25))
 	_figure.transform = Transform3D(body, pivot - body * pivot + Vector3.UP * hop * (1.0 - melt))
@@ -628,8 +626,9 @@ func _process(delta: float) -> void:
 	var ground := global_position.y if is_on_floor() else NAN
 	if melt > 0.5:
 		# A puddle smears one wide track along under its middle
-		var under: Array[Vector3] = [global_position]
-		_trail.step(under, ground, 0.7, delta)
+		# (laid from under the back of the puddle, so its front end never shows ahead of it)
+		var under: Array[Vector3] = [global_position - forward() * 0.6]
+		_trail.step(under, ground, 0.55, delta)
 	else:
 		var contacts := _figure.feet()
 		var width := 0.16
@@ -664,10 +663,10 @@ func _process(delta: float) -> void:
 	_blob.rotation = Vector3(0.0, heading, lean)
 	# Eyes peeking out of the front of it
 	for eye in _puddle_eyes:
-		eye.visible = pooled > 0.6
+		eye.visible = false # (his own eyes are still up on his head)
 		var side: float = eye.get_meta("side")
 		var front := BLOB_RADIUS * _blob.scale.z * 0.62
-		var spot := Vector3(side * 0.09, BLOB_RADIUS * _blob.scale.y * 1.7, -front)
+		var spot := Vector3(side * 0.09, BLOB_RADIUS * _blob.scale.y * 1.5, -front * 0.95)
 		eye.position = Basis(Vector3.UP, heading) * spot
 		eye.rotation = Vector3(0.0, heading + side * 0.3, -side * 0.35)
 
@@ -739,7 +738,12 @@ func _wall_puddle(point: Vector3, normal: Vector3) -> void:
 	var across := flat.cross(Vector3.UP).normalized()
 	# The puddle's thin axis (its y) along the wall's normal
 	var facing := Basis(across, flat, across.cross(flat))
-	var centre := Vector3(point.x, global_position.y + 0.75, point.z) + flat * 0.06
+	# On the thing hit, as high up it as goes (up to chest height), smaller on something small
+	var centre := _on_surface(Vector3(point.x, global_position.y + 0.3, point.z), Vector3(point.x, global_position.y + 0.8, point.z), flat)
+	var reach := 1.0
+	for probe in [Vector3.UP * 0.55, Vector3.DOWN * 0.3]:
+		if _on_surface(centre, centre + probe, flat) == centre:
+			reach = 0.6 # the surface runs out close by: a smaller splat
 	for eye in _puddle_eyes:
 		eye.visible = false
 	_blob.visible = true
@@ -750,7 +754,10 @@ func _wall_puddle(point: Vector3, normal: Vector3) -> void:
 		_wall_tween.kill()
 	_wall_tween = create_tween()
 	# Slapped flat against it, spreading with a wobble, then sliding slowly down
-	_wall_tween.tween_property(_blob, "scale", Vector3(1.5, 0.12, 1.9), 0.35).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	# Round sometimes; otherwise an oval at any angle
+	var round := randf() < 0.4
+	_blob.global_basis = Basis(flat, randf_range(-PI, PI)) * _blob.global_basis
+	_wall_tween.tween_property(_blob, "scale", (Vector3(1.7, 0.05, 1.7) if round else Vector3(1.45, 0.05, 1.95)) * Vector3(reach, 1.0, reach), 0.35).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 	_wall_tween.parallel().tween_property(_blob, "global_position", centre + Vector3.DOWN * 0.45, RESPAWN_DELAY + 1.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	# ...then the arms, one after the other, slapping into the wall either side of it
 	if _arm_puddles.is_empty():
@@ -762,22 +769,42 @@ func _wall_puddle(point: Vector3, normal: Vector3) -> void:
 			arm.visible = false
 			add_child(arm)
 			_arm_puddles.append(arm)
+	# Never the same twice: either arm first, high or low, near or flung wide, at any angle, big or
+	# small, quick or late, and sliding down the wall at its own pace (now and then into the body's)
+	var first := -1.0 if randf() < 0.5 else 1.0
 	for i in 2:
 		var arm := _arm_puddles[i]
-		var side := -1.0 if i == 0 else 1.0
-		var spot := centre + across * side * randf_range(0.75, 0.95) + Vector3.UP * randf_range(0.1, 0.35)
-		var tilt := Basis(flat, side * randf_range(0.3, 0.7)) * facing # stretched out at an angle
+		var side := first if i == 0 else -first
+		var spot := _on_surface(centre, centre + across * side * randf_range(0.55, 1.35) + Vector3.UP * randf_range(-0.35, 0.7), flat)
+		var tilt := Basis(flat, randf_range(-PI, PI)) * facing # stretched out at any angle
 		arm.global_transform = Transform3D(tilt.scaled_local(Vector3(0.05, 0.05, 0.05)), spot)
-		var delay := 0.12 + i * 0.09 + randf_range(0.0, 0.05)
+		var delay := randf_range(0.06, 0.2) + i * randf_range(0.04, 0.25)
+		var size := randf_range(0.75, 1.3)
+		var drip := randf_range(0.15, 0.9)
 		var splat := create_tween()
 		splat.tween_interval(delay)
 		splat.tween_callback(func():
 			arm.visible = true
-			_droplets.burst(2, 0.6)
+			_droplets.burst(randi_range(1, 4), randf_range(0.4, 0.9))
 		)
-		splat.tween_property(arm, "scale", Vector3(0.5, 0.09, 1.0), 0.3).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
-		splat.tween_property(arm, "global_position", spot + Vector3.DOWN * 0.35, RESPAWN_DELAY + 0.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		var arm_shape := Vector3(0.75, 0.09, 0.75) if randf() < 0.4 else Vector3(0.5, 0.09, randf_range(0.8, 1.4)) # round sometimes
+		splat.tween_property(arm, "scale", Vector3(arm_shape.x * size, 0.05, arm_shape.z * size), randf_range(0.2, 0.4)).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+		splat.tween_property(arm, "global_position", spot + Vector3.DOWN * drip, RESPAWN_DELAY + randf_range(0.3, 1.4)).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	_droplets.clear()
+
+
+## A spot on the surface that was hit, as near `wanted` as the surface goes (stepping back toward
+## `centre` until there's something there to splat on)
+func _on_surface(centre: Vector3, wanted: Vector3, normal: Vector3) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	for k in 6:
+		var spot := wanted.lerp(centre, k / 5.0)
+		var ray := PhysicsRayQueryParameters3D.create(spot + normal * 0.4, spot - normal * 0.4)
+		ray.exclude = [get_rid()]
+		var hit := space.intersect_ray(ray)
+		if not hit.is_empty():
+			return hit.position + normal * 0.04
+	return centre
 
 
 func _respawn_at(spot: Vector3, facing: float) -> void:

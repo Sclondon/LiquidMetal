@@ -178,7 +178,7 @@ func _on_splat() -> void:
 	var new_best := metres > _best
 	if new_best:
 		_best = metres
-		if not OS.get_cmdline_args().has("-s"): # real play, not a test script: keep it
+		if get_tree().current_scene == self: # real play (a test script builds its own): keep it
 			_save_best(_best)
 	_input.set_process_input(false)
 	# Let the splat land first
