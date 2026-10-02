@@ -1,12 +1,12 @@
 shader_type canvas_item;
-// An N64 look over the whole game: the picture drawn at about 240 lines, then blown up with
+// An N64 look over the whole game, kept light: the picture drawn at about 400 lines, then blown up with
 // the console's soft bilinear blur rather than as hard pixels, in 16-bit colour (5 bits a
 // channel) with an ordered dither, like its framebuffer.
 
 uniform sampler2D screen : hint_screen_texture, filter_nearest;
-uniform float lines = 240.0; // the low-res picture's height
+uniform float lines = 400.0; // the low-res picture's height (the real N64 was 240: too much)
 uniform float levels = 31.0; // colour steps per channel (5 bits)
-uniform float dither = 1.0;
+uniform float dither = 0.4;
 
 vec3 cell_colour(vec2 cell, vec2 res) {
 	return texture(screen, (cell + 0.5) / res).rgb;

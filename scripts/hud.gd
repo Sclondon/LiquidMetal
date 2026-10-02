@@ -1,5 +1,5 @@
 extends CanvasLayer
-## Test-area HUD: drop count, a controls card that fades out, and a TUNE panel with
+## Test-area HUD: drop count, the DASH button, and a TUNE panel with
 ## sliders for the feel (speed, turning, jump, camera) plus a back-to-start button.
 
 var player: CharacterBody3D
@@ -8,7 +8,6 @@ var restart: Callable # a new course, back at the start
 var n64: CanvasLayer # the N64 filter, switched in the TUNE panel
 
 var _drops := Label.new()
-var _help := PanelContainer.new()
 var _tune_button := Button.new()
 var _panel := PanelContainer.new()
 var _flash := ColorRect.new()
@@ -37,24 +36,6 @@ func _ready() -> void:
 	_on_drops(0)
 	player.drops_changed.connect(_on_drops)
 	player.splatted.connect(_on_splat)
-
-	# The controls, bottom middle, gone after a while (TUNE has them again)
-	var help_text := Label.new()
-	help_text.text = "HOLD left / right side to turn\nSWIPE up jump · down duck · left / right dodge\nDASH button: a burst of speed
-keys: A/D turn · Space jump · S duck · arrows dodge · Shift dash · R new course"
-	help_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	help_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	help_text.add_theme_font_size_override("font_size", 18)
-	_help.add_child(help_text)
-	_help.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_help.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 170) # above the DASH button
-	_help.custom_minimum_size.x = 660
-	_help.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_help.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	root.add_child(_help)
-	var fade := create_tween()
-	fade.tween_interval(9.0)
-	fade.tween_property(_help, "modulate:a", 0.0, 1.5)
 
 	_tune_button.text = "TUNE"
 	_tune_button.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 14)
@@ -100,10 +81,6 @@ func _build_panel(root: Control) -> void:
 	retro.button_pressed = n64.visible
 	retro.toggled.connect(func(on): n64.visible = on)
 	rows.add_child(retro)
-	var help := Button.new()
-	help.text = "Show controls"
-	help.pressed.connect(func(): _help.modulate.a = 1.0)
-	rows.add_child(help)
 
 
 func _slider(rows: VBoxContainer, title: String, low: float, high: float, step: float, value: float, apply: Callable) -> void:

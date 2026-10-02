@@ -36,7 +36,7 @@ If you edit the .blend by hand instead, export glTF (.glb) to `models/mercury.gl
 - `runner_input.gd` – swipe / hold / keyboard → signals and a turn axis.
 - `droplets.gd` – little blobs that flop off Mercury as it moves and get pulled back in.
 - `follow_cam.gd`, `hud.gd` (DASH button; TUNE panel: speed, turn rate, jump height, camera, N64 filter).
-- `shaders/n64.gdshader` – the N64 look: ~240-line picture, soft bilinear upscale, 16-bit colour with dither.
+- `shaders/n64.gdshader` – the N64 look: ~400-line picture (kept light), soft bilinear upscale, 16-bit colour with dither.
 
 ## Tests (headless)
 
