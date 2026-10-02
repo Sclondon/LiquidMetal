@@ -407,7 +407,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			var wind := _cock - 1.0 if _cock > 1.0 else 0.0
 			var cocked := Vector3(-1.3 - wind * 2.2, 0.0, out_sign * (1.0 + wind * 0.9))
 			var thrown := Vector3(2.55, 0.0, 0.0)
-			turn = turn.lerp(cocked, minf(_cock, 1.0)).lerp(thrown, _punch)
+			turn = turn.lerp(thrown, _punch) # (the wind-up is aimed in _bounce)
 		var index := _jiggles.find(arm)
 		if index >= 0:
 			_turned[index] = turn
@@ -500,5 +500,22 @@ func _bounce(delta: float) -> void:
 			var aimed := Basis(x, y, x.cross(y))
 			var aim_local := (_parts[i].global_basis.orthonormalized().inverse() * aimed).orthonormalized()
 			turned = Basis(Quaternion(turned.orthonormalized()).slerp(Quaternion(aim_local), _punch))
+		if _cock > 0.0 and _punch < 1.0 and _hands.values().has(_jiggles[i]):
+			# Winding up: both arms swept back behind him, a little out to the sides at first, then
+			# drawn further and further back and up the longer it's held
+			var fwd: Vector3 = (get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z
+			var centre := Vector3.ZERO
+			for arm in _hands.values():
+				centre += (arm as Node3D).get_parent().global_position
+			centre /= maxf(_hands.size(), 1)
+			var out := _parts[i].global_position - centre
+			out.y = 0.0
+			out = out.normalized()
+			var wound := clampf(_cock - 1.0, 0.0, 0.5) * 2.0
+			var dir := (-fwd.normalized() * (0.8 + 0.2 * wound) + out * (0.55 - 0.35 * wound) + Vector3.UP * (-0.25 + 0.75 * wound)).normalized()
+			var wy := -dir
+			var wx := wy.cross(Vector3.UP).normalized()
+			var wind_aim := (_parts[i].global_basis.orthonormalized().inverse() * Basis(wx, wy, wx.cross(wy))).orthonormalized()
+			turned = Basis(Quaternion(turned.orthonormalized()).slerp(Quaternion(wind_aim), minf(_cock, 1.0) * (1.0 - _punch)))
 		_jiggles[i].basis = turned * Basis.from_scale(shape) # (keeps the head's look)
 	_springs_ready = true
