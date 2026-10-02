@@ -5,6 +5,7 @@ extends CanvasLayer
 var player: CharacterBody3D
 var cam: Camera3D
 var restart: Callable # a new course, back at the start
+var to_menu: Callable # back to the title menu
 var n64: CanvasLayer # the N64 filter, switched in the TUNE panel
 
 var _drops := Label.new()
@@ -12,6 +13,7 @@ var _tune_button := Button.new()
 var _panel := PanelContainer.new()
 var _flash := ColorRect.new()
 var _dash := Button.new()
+var _distance := Label.new() # endless mode: metres run
 
 
 func _ready() -> void:
@@ -34,6 +36,13 @@ func _ready() -> void:
 	_drops.add_theme_constant_override("outline_size", 6)
 	root.add_child(_drops)
 	_on_drops(0)
+	_distance.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 12)
+	_distance.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_distance.add_theme_font_size_override("font_size", 44)
+	_distance.add_theme_color_override("font_outline_color", Color.BLACK)
+	_distance.add_theme_constant_override("outline_size", 8)
+	_distance.visible = false
+	root.add_child(_distance)
 	player.drops_changed.connect(_on_drops)
 	player.splatted.connect(_on_splat)
 
@@ -73,9 +82,19 @@ func _build_panel(root: Control) -> void:
 	_slider(rows, "Camera distance", 3.0, 14.0, 0.5, cam.distance, func(v): cam.distance = v)
 	_slider(rows, "Camera height", 1.0, 8.0, 0.25, cam.height, func(v): cam.height = v)
 	var back := Button.new()
-	back.text = "New course"
-	back.pressed.connect(func(): restart.call())
+	back.text = "Restart (new course)"
+	back.pressed.connect(func():
+		_panel.visible = false
+		restart.call()
+	)
 	rows.add_child(back)
+	var leave := Button.new()
+	leave.text = "Menu"
+	leave.pressed.connect(func():
+		_panel.visible = false
+		to_menu.call()
+	)
+	rows.add_child(leave)
 	var mirror := CheckButton.new()
 	mirror.text = "Real reflections"
 	mirror.button_pressed = player.real_reflections
@@ -118,6 +137,15 @@ func is_over_ui(point: Vector2) -> bool:
 
 func _process(_delta: float) -> void:
 	_dash.modulate.a = 0.4 if player.dash_cooldown > 0.0 else 1.0
+
+
+func show_distance(on: bool) -> void:
+	_distance.visible = on
+	set_distance(0)
+
+
+func set_distance(metres: int) -> void:
+	_distance.text = "%d m" % metres
 
 
 func _on_drops(total: int) -> void:

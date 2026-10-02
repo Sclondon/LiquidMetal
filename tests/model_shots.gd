@@ -24,6 +24,7 @@ var shots := [
 
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
+	main.start_mode = "test"
 	root.add_child(main)
 
 

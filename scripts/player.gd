@@ -12,6 +12,7 @@ const FAST_FALL := 2.6 # gravity multiplier when you swipe down in the air
 const DODGE_DIST := 4.5
 const DODGE_TIME := 0.2
 const DUCK_TIME := 0.75
+const JUMP_BUFFER := 0.2 # seconds a jump pressed in the air is kept for the landing
 const SLIDE_LEAD := 0.28 # seconds in the slide pose (hop included) before melting into the puddle
 const HOP_TIME := 0.24 # the hop into a slide (just the figure: the collider stays low)
 const HOP_HEIGHT := 0.45
@@ -58,6 +59,7 @@ var steer := 0.0 # smoothed turn input, -1..1
 var drops := 0
 var ducking := false
 var dead := false
+var rewind_on_splat := true # false (endless mode): a splat ends the run, no coming back
 var dash_cooldown := 0.0 # seconds until the next dash (the HUD's button shows it)
 
 var _dodge_left := 0.0
@@ -97,6 +99,16 @@ var _spin_time := 1.0
 var _spin_left := 0.0
 var _last_trick := {}
 var _hop_left := 0.0
+var _jump_buffer := 0.0
+# The splat on landing: metal thrown out from the feet and a rippling puddle spreading under it
+const LAND_TIME := 0.45
+var _land_spray := CPUParticles3D.new()
+var _land_pool := MeshInstance3D.new()
+var _land_material: ShaderMaterial
+var _land_left := 0.0
+const LAND_HOLD := 0.45 # seconds the superhero landing is held
+var _land_hold := 0.0
+var _air_time := 0.0
 var _melt := 0.0 # 0 = Mercury standing, 1 = a puddle (ducking, or pulling back together)
 var _splash := CPUParticles3D.new()
 
@@ -185,6 +197,40 @@ func _ready() -> void:
 	_feet.position.y = 0.05
 	add_child(_feet)
 
+	_land_spray.mesh = splash
+	_land_spray.amount = 28
+	_land_spray.lifetime = 0.55
+	_land_spray.one_shot = true
+	_land_spray.explosiveness = 1.0
+	_land_spray.emitting = false
+	_land_spray.local_coords = false
+	_land_spray.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+	_land_spray.emission_ring_axis = Vector3.UP
+	_land_spray.emission_ring_radius = 0.35
+	_land_spray.emission_ring_inner_radius = 0.2
+	_land_spray.emission_ring_height = 0.0
+	_land_spray.direction = Vector3.UP
+	_land_spray.spread = 70.0
+	_land_spray.initial_velocity_min = 3.0
+	_land_spray.initial_velocity_max = 6.5
+	_land_spray.gravity = Vector3(0, -GRAVITY * 0.8, 0)
+	_land_spray.scale_amount_min = 0.7
+	_land_spray.scale_amount_max = 1.8
+	_land_spray.position.y = 0.05
+	add_child(_land_spray)
+	var pool := SphereMesh.new()
+	pool.radius = 1.0
+	pool.height = 2.0
+	pool.radial_segments = 32
+	pool.rings = 8
+	_land_pool.mesh = pool
+	_land_material = _material.duplicate()
+	_land_pool.material_override = _land_material
+	_land_pool.top_level = true
+	_land_pool.visible = false
+	_land_pool.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	add_child(_land_pool)
+
 	_probe.size = Vector3(90.0, 30.0, 90.0)
 	_probe.position = Vector3(0.0, 1.2, 0.0)
 	_probe.update_mode = ReflectionProbe.UPDATE_ALWAYS
@@ -245,6 +291,11 @@ func restart() -> void:
 	_respawn_at(_spawn.origin, _spawn.basis.get_euler().y)
 
 
+func reset_drops() -> void:
+	drops = 0
+	drops_changed.emit(drops)
+
+
 func collect_drop() -> void:
 	drops += 1
 	_squash = maxf(_squash, 0.18)
@@ -254,16 +305,18 @@ func collect_drop() -> void:
 func _on_jump() -> void:
 	if dead:
 		return
-	if is_on_floor():
-		_set_ducking(false)
-		if ducking:
-			return # wedged under something: no room to spring up
-		velocity.y = sqrt(2.0 * GRAVITY * jump_height)
-		_squash = -0.25 # a stretch on take-off
-		_agitation = 1.0
-		_liquid_hold = 0.2
-		_droplets.burst(3)
-		_trick("jump", 1.0, 0.6)
+	if not is_on_floor():
+		_jump_buffer = JUMP_BUFFER # pressed just before landing: jump as it touches down
+		return
+	_set_ducking(false)
+	if ducking:
+		return # wedged under something: no room to spring up
+	velocity.y = sqrt(2.0 * GRAVITY * jump_height)
+	_squash = -0.25 # a stretch on take-off
+	_agitation = 1.0
+	_liquid_hold = 0.2
+	_droplets.burst(3)
+	_trick("jump", 1.0, 0.6)
 
 
 func _on_duck() -> void:
@@ -360,7 +413,17 @@ func _physics_process(delta: float) -> void:
 		return
 
 	var on_floor := is_on_floor()
+	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
+	if on_floor and not _was_on_floor and _jump_buffer > 0.0:
+		_jump_buffer = 0.0
+		_was_on_floor = true
+		_on_jump()
+		return
+	_air_time = 0.0 if on_floor and _was_on_floor else _air_time + delta
 	if on_floor and not _was_on_floor:
+		if _air_time > 0.35: # a real jump, not a bump: the superhero landing
+			_land_hold = LAND_HOLD
+		_land_splat()
 		_squash = 0.3
 		_droplets.burst(5)
 		_agitation = 1.0
@@ -424,7 +487,8 @@ func _process(delta: float) -> void:
 		hop = sin(PI * (1.0 - _hop_left / HOP_TIME)) * HOP_HEIGHT
 	_figure.transform = Transform3D(turn * Basis.from_scale(stretch.lerp(Vector3.ONE, melt)), middle - turn * middle + Vector3.UP * hop)
 	_figure.set_puddle(_melt) # the parts melt into puddles one by one
-	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking)
+	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking, _land_hold > 0.0 and not ducking)
+	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
 	var liquid := not is_on_floor() or is_dashing() or _liquid_hold > 0.0
@@ -436,6 +500,7 @@ func _process(delta: float) -> void:
 		_drip_clock = randf_range(0.15, 0.45)
 		_droplets.burst(randi_range(1, 2), 0.7)
 
+	_update_land_splat(delta)
 	# Splashing at its feet while it runs on the ground, and a track under each foot
 	var running := is_on_floor() and melt < 0.5 and not dead
 	_feet.emitting = running
@@ -457,6 +522,25 @@ func _process(delta: float) -> void:
 	_blob.scale = Vector3(1.7, 0.3, 1.7) * maxf(pooled, 0.01)
 	_blob.position.y = BLOB_RADIUS * _blob.scale.y
 	_blob.rotation = Vector3(0.0, heading, lean)
+
+
+## Landing: a splash of metal thrown out from the feet and a puddle that ripples out and sinks
+func _land_splat() -> void:
+	_land_spray.restart()
+	_land_pool.global_position = global_position + Vector3.UP * 0.01
+	_land_pool.visible = true
+	_land_left = LAND_TIME
+
+
+func _update_land_splat(delta: float) -> void:
+	if _land_left <= 0.0:
+		return
+	_land_left = maxf(_land_left - delta, 0.0)
+	var t := 1.0 - _land_left / LAND_TIME
+	var r := lerpf(0.35, 1.4, 1.0 - pow(1.0 - t, 3.0)) # flung out fast, then slowing
+	_land_pool.scale = Vector3(r, 0.07 * (1.0 - t), r)
+	_land_material.set_shader_parameter("splash", 1.0 - t)
+	_land_pool.visible = _land_left > 0.0
 
 
 func _set_shape(size: Dictionary) -> void:
@@ -497,6 +581,8 @@ func _splat() -> void:
 	_feet.emitting = false
 	_spin_left = 0.0
 	splatted.emit()
+	if not rewind_on_splat:
+		return
 	var back := clampi(_history.size() - int(REWIND / 0.1), 0, _history.size())
 	var spot: Vector3 = _spawn.origin
 	var facing: float = _spawn.basis.get_euler().y

@@ -14,6 +14,7 @@ var x0 := 0.0
 
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
+	main.start_mode = "test"
 	root.add_child(main)
 
 
@@ -46,6 +47,8 @@ func _process(delta: float) -> bool:
 		return false
 	match step:
 		0:
+			main.area.generate(4242) # one fixed course, so nothing random is in the way
+			player.restart()
 			player.run_speed = 5.0 # stay short of the lane's first obstacle for the whole test
 			wait = 0.5 # let it settle on the floor
 		1:

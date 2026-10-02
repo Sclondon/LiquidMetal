@@ -7,12 +7,13 @@ var main: Node
 var t := 0.0
 var jumped := false
 var ducked := false
-var times := [1.0, 1.04, 1.08, 1.12, 1.2, 1.35, 1.55, 2.05, 2.12, 2.2, 2.3, 2.45]
+var times := [1.0, 1.04, 1.08, 1.12, 1.2, 1.35, 1.55, 1.68, 1.8, 1.95, 2.05, 2.12, 2.2, 2.3, 2.45]
 var taken := 0
 
 
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
+	main.start_mode = "test"
 	root.add_child(main)
 
 
@@ -29,7 +30,7 @@ func _process(delta: float) -> bool:
 	if t >= 0.98 and not jumped:
 		jumped = true
 		player.input.jump.emit()
-	if t >= 2.0 and not ducked:
+	if t >= 2.02 and not ducked:
 		ducked = true
 		player.input.duck.emit()
 	if taken < times.size() and t >= times[taken]:

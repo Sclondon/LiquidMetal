@@ -2,6 +2,10 @@
 
 A 3D auto runner for the Scareathon arcade: you are Mercury, a figure of liquid metal that runs on its own.
 
+The menu has two modes: **ENDLESS RUN** (a lane that never ends and speeds up the further you get; one splat
+ends the run; your best distance is saved) and **TEST AREA** (the playground; a splat rewinds you a moment).
+Esc (or TUNE → Menu) goes back to the menu.
+
 | Do | Touch / mouse | Keys |
 | --- | --- | --- |
 | Turn | tap and hold the left / right half of the screen | A / D (held) |
@@ -34,12 +38,15 @@ exports `models/mercury.glb`:
 
 If you edit the .blend by hand instead, export glTF (.glb) to `models/mercury.glb` with Animation mode "NLA Tracks".
 - `runner_input.gd` – swipe / hold / keyboard → signals and a turn axis.
-- `trail.gd` – the trail of little puddles left behind; splashes at the feet are a CPUParticles3D in player.gd.
+- `trail.gd` – the two tracks left under the feet; splashes at the feet and the landing splat are in player.gd.
+- `endless.gd` – endless mode's course, built in chunks ahead and cleared behind. `menu.gd` – title and game-over.
 - `droplets.gd` – little blobs that flop off Mercury as it moves and get pulled back in.
 - `follow_cam.gd`, `hud.gd` (DASH button; TUNE panel: speed, turn rate, jump height, camera, N64 filter).
 - `shaders/n64.gdshader` – the N64 look: ~400-line picture (kept light), soft bilinear upscale, 16-bit colour with dither.
 
 ## Tests (headless)
+
+    godot --headless --path . -s res://tests/endless_bot.gd  # bot plays endless mode to 1500 m: no splats
 
     godot --headless --path . -s res://tests/lane_bot.gd     # bot runs 5 random lanes with the controls: 0 splats
     godot --headless --path . -s res://tests/touch_test.gd   # fake touches: hold turns, swipes jump/duck/dodge

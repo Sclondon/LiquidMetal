@@ -10,6 +10,7 @@
 # Animations (NLA tracks; each becomes one glTF animation across all the parts):
 #   run  - 36 frames at 30 fps, looping: long, snappy strides, each a deep lunge, body
 #          banking over the front leg, leaning forward, arms trailing back ninja-run style
+#   land  - the superhero landing (one knee down, one hand on the floor), slammed into and held
 #   slide - drops into a slide (lead leg out, the other folded under, leaning back) and holds it
 #   jump - snaps from the push-off into a leap (knees tucked, arms swept back) and holds it
 
@@ -317,6 +318,25 @@ def slide_keys():
         ninja_arms(frame, rx=36)
 
 
+def land_keys():
+    thigh_l, shin_l = legs["L"]
+    thigh_r, shin_r = legs["R"]
+    arm_l = arms["L"][0]
+    arm_r = arms["R"][0]
+    # The superhero landing: dropped onto one knee, the other foot planted out in front, one hand
+    # flat on the floor, the other arm flung out behind, head down. Slams in, then holds.
+    for frame, sink in ((0, -1.0), (3, -1.05), (12, -1.0)):
+        key(hips, frame, rx=-8, z=sink)
+        key(chest, frame, rx=-48)
+        key(head, frame, rx=-6)  # head down
+        key(thigh_l, frame, rx=80, ry=6)  # front leg: foot planted ahead
+        key(shin_l, frame, rx=-100)
+        key(thigh_r, frame, rx=-25, ry=-8)  # back leg: knee down on the floor
+        key(shin_r, frame, rx=-112)
+        key(arm_r, frame, rx=58, ry=-12)  # straight down to the floor
+        key(arm_l, frame, rx=-55, ry=70)  # out behind
+
+
 def bake(track_name, keyer, interpolation):
     animated = [o for o in scene.objects if o.type == "MESH" and not o.name.startswith("eye_")]
     animated.append(hips)
@@ -343,6 +363,7 @@ def bake(track_name, keyer, interpolation):
 bake("run", run_keys, "EXPO")  # snaps between the poses and holds them
 bake("jump", jump_keys, "QUART")
 bake("slide", slide_keys, "QUART")
+bake("land", land_keys, "QUART")
 
 scene.frame_start = 0
 scene.frame_end = RUN_FRAMES

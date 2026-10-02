@@ -243,11 +243,11 @@ func _shape_balls() -> void:
 
 ## Pose for this frame. speed: ground speed; airborne + vertical speed; steer -1..1; sliding:
 ## dropping into a duck
-func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float, sliding := false) -> void:
-	var pose := "slide" if sliding else ("jump" if airborne else "run")
+func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float, sliding := false, landing := false) -> void:
+	var pose := "slide" if sliding else ("jump" if airborne else ("land" if landing else "run"))
 	if pose != _pose:
 		_pose = pose
-		_anim.play(pose, BLEND)
+		_anim.play(pose, 0.04 if pose == "land" else BLEND) # slammed into
 	_anim.speed_scale = maxf(speed, 1.0) / RUN_PACE if pose == "run" else 1.0
 	for i in _splash.size():
 		_splash[i] = move_toward(_splash[i], 0.0, _delta * 1.6)
