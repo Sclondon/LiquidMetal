@@ -10,7 +10,8 @@
 # Animations (NLA tracks; each becomes one glTF animation across all the parts):
 #   run  - 36 frames at 30 fps, looping: long, flowing strides, each a deep lunge, body
 #          banking over the front leg, leaning forward, arms trailing back ninja-run style
-#   land  - the superhero landing (one knee down, one hand on the floor), slammed into and held
+#   land_R / land_L - the superhero landing on either hand, held, then the arm thrown back and a
+#          step out into the run
 #   slide - drops into a slide (lead leg out, the other folded under, leaning back) and holds it
 #   jump - snaps from the push-off into a leap (knees tucked, arms swept back) and holds it
 
@@ -318,23 +319,48 @@ def slide_keys():
         ninja_arms(frame, rx=36)
 
 
-def land_keys():
-    thigh_l, shin_l = legs["L"]
-    thigh_r, shin_r = legs["R"]
-    arm_l = arms["L"][0]
-    arm_r = arms["R"][0]
-    # The superhero landing: dropped onto one knee, the other foot planted out in front, one hand
-    # flat on the floor, the other arm flung out behind, head down. Slams in, then holds.
+def land_keys(hand):
+    # The superhero landing, on either hand ("R" or "L": the other is its mirror image): dropped onto
+    # one knee, the other foot planted out in front, one hand flat on the floor, the other arm
+    # flung out behind, head down. Slams in and holds (frames 0-12), then throws the down arm
+    # back and steps the knee leg through into a lunge (12-22), which is where the run picks up:
+    # the right leg's lunge (run frame 18) for the right hand, the left's (frame 0) for the left.
+    m = 1 if hand == "R" else -1
+    other = "L" if hand == "R" else "R"
+    front_thigh, front_shin = legs[other]  # the foot planted ahead
+    knee_thigh, knee_shin = legs[hand]  # the knee down on the floor, same side as the hand
+    down_arm = arms[hand][0]
+    back_arm = arms[other][0]
     for frame, sink in ((0, -1.0), (3, -1.05), (12, -1.0)):
         key(hips, frame, rx=-8, z=sink)
         key(chest, frame, rx=-48)
         key(head, frame, rx=-6)  # head down
-        key(thigh_l, frame, rx=80, ry=6)  # front leg: foot planted ahead
-        key(shin_l, frame, rx=-100)
-        key(thigh_r, frame, rx=-25, ry=-8)  # back leg: knee down on the floor
-        key(shin_r, frame, rx=-112)
-        key(arm_r, frame, rx=58, ry=-12)  # straight down to the floor
-        key(arm_l, frame, rx=-55, ry=70)  # out behind
+        key(front_thigh, frame, rx=80, ry=-6 * m)
+        key(front_shin, frame, rx=-100)
+        key(knee_thigh, frame, rx=-25, ry=8 * m)
+        key(knee_shin, frame, rx=-112)
+        key(down_arm, frame, rx=58, ry=-12 * m)  # straight down to the floor
+        key(back_arm, frame, rx=-55, ry=-70 * m)  # out behind
+    # Up and out: the hand off the floor and thrown right back, the knee leg swinging through
+    key(hips, 16, z=-0.6, ry=6 * m)
+    key(chest, 16, rx=-40)
+    key(head, 16, rx=30)
+    key(front_thigh, 16, rx=20, ry=-10 * m)
+    key(front_shin, 16, rx=-30)
+    key(knee_thigh, 16, rx=35, ry=6 * m)
+    key(knee_shin, 16, rx=-100)
+    key(down_arm, 16, rx=-85, ry=40 * m)  # flung back
+    key(back_arm, 16, rx=-20, ry=-40 * m)
+    # ...into the lunge the run carries on from
+    key(hips, 22, ry=12 * m, x=0.12 * m, z=-0.89)
+    key(chest, 22, rx=-58, rz=-14 * m)
+    key(head, 22, rx=70)
+    key(knee_thigh, 22, rx=76, ry=4 * m)
+    key(knee_shin, 22, rx=-86)
+    key(front_thigh, 22, rx=-52, ry=-20 * m)
+    key(front_shin, 22, rx=-4)
+    for arm, s in arms.values():
+        key(arm, 22, rx=8, ry=-s * 30)
 
 
 def bake(track_name, keyer, interpolation):
@@ -369,7 +395,8 @@ def bake(track_name, keyer, interpolation):
 bake("run", run_keys, "BEZIER")  # flows on through each pose into the next (no holds)
 bake("jump", jump_keys, "QUART")
 bake("slide", slide_keys, "QUART")
-bake("land", land_keys, "QUART")
+bake("land_R", lambda: land_keys("R"), "QUART")
+bake("land_L", lambda: land_keys("L"), "QUART")
 
 scene.frame_start = 0
 scene.frame_end = RUN_FRAMES

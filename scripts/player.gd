@@ -12,6 +12,17 @@ const FAST_FALL := 2.6 # gravity multiplier when you swipe down in the air
 const DODGE_DIST := 4.5
 const DODGE_TIME := 0.2
 const DUCK_TIME := 0.75
+# Wall running: touch a wall in the air (jump, then dodge into it) and it runs along it, feet on
+# the wall, sinking slowly; jump to kick off it; it drops off when the wall ends or time runs out
+const WALL_RUN_MAX := 1.6
+const WALL_GRAVITY := 0.12 # of normal gravity, while on the wall
+const WALL_LIFT := 2.5 # m/s up as it catches the wall
+var wall_running := false
+var _wall_normal := Vector3.ZERO # out of the wall
+var _wall_time := 0.0
+var _wall_lost := 0.0 # seconds without touching the wall (a short grace before dropping off)
+var _wall_cooldown := 0.0
+var _wall_roll := 0.0 # the figure turned onto its side, smoothed
 const JUMP_BUFFER := 0.2 # seconds a jump pressed in the air is kept for the landing
 # The slide: a quick hop, then SPLAT, the whole figure squashed flat into one puddle that skims
 # along the floor, wobbling, eyes glinting at the front; then it pops back up out of it, tall
@@ -115,7 +126,8 @@ var _jump_buffer := 0.0
 # The splat on landing: particles of metal thrown up and out from the feet, and skittering along the floor
 var _land_spray := CPUParticles3D.new()
 var _land_skid := CPUParticles3D.new()
-const LAND_HOLD := 0.45 # seconds the superhero landing is held
+const LAND_HOLD := 0.73 # the superhero landing: held 0.4 s, then 0.33 s stepping out of it
+const LAND_PLANTED := 0.4 # the part with the hand and knee down
 var _land_hold := 0.0
 var _air_time := 0.0
 var _melt := 0.0 # 0 = Mercury standing, 1 = a puddle (ducking, or pulling back together)
@@ -339,6 +351,16 @@ func collect_drop() -> void:
 func _on_jump() -> void:
 	if dead:
 		return
+	if wall_running:
+		# Kick off the wall: up, and a dodge away from it
+		_end_wall_run()
+		velocity.y = sqrt(2.0 * GRAVITY * jump_height)
+		_dodge_dir = signf(_wall_normal.dot(right()))
+		_dodge_left = DODGE_TIME
+		_agitation = 1.0
+		_droplets.burst(4)
+		_trick("jump", 1.0, 0.6)
+		return
 	if not is_on_floor():
 		_jump_buffer = JUMP_BUFFER # pressed just before landing: jump as it touches down
 		return
@@ -394,6 +416,11 @@ func _spin(axis: Vector3, turn: float, time: float) -> void:
 	_spin_left = time
 
 
+func _end_wall_run() -> void:
+	wall_running = false
+	_wall_cooldown = 0.35
+
+
 func is_dashing() -> bool:
 	return _dash_left > 0.0
 
@@ -423,8 +450,11 @@ func _physics_process(delta: float) -> void:
 		sideways = _dodge_dir * DODGE_DIST / DODGE_TIME * step / delta
 		_dodge_left -= delta
 
-	if not is_on_floor():
+	if wall_running:
+		velocity.y -= GRAVITY * WALL_GRAVITY * delta
+	elif not is_on_floor():
 		velocity.y -= GRAVITY * (FAST_FALL if _fast_fall else 1.0) * delta
+	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
 	dash_cooldown = maxf(dash_cooldown - delta, 0.0)
 	# Builds back up to running speed (sliding as a puddle and landing hard slow it)
 	speed = move_toward(speed, run_speed, ACCELERATION * delta) # (a slide keeps its speed)
@@ -433,17 +463,42 @@ func _physics_process(delta: float) -> void:
 		going *= DASH_BOOST
 		_dash_left -= delta
 	var ground := forward() * going + right() * sideways
+	if wall_running:
+		ground -= _wall_normal * 2.0 # pressed against the wall, to stay on it
 	velocity.x = ground.x
 	velocity.z = ground.z
 	move_and_slide()
 
-	# Head-on into something: splat (glancing blows just slide along it)
+	# Head-on into something: splat (glancing blows just slide along it). A wall alongside, in
+	# the air, is one to run on.
+	var side_wall := Vector3.ZERO
 	for i in get_slide_collision_count():
 		var hit := get_slide_collision(i)
 		var normal := hit.get_normal()
 		if normal.y < 0.5 and normal.dot(forward()) < -0.6:
 			_splat()
 			return
+		if absf(normal.y) < 0.3 and absf(normal.dot(forward())) < 0.5:
+			side_wall = Vector3(normal.x, 0.0, normal.z).normalized()
+	if wall_running:
+		_wall_time += delta
+		if side_wall != Vector3.ZERO:
+			_wall_normal = side_wall
+			_wall_lost = 0.0
+		else:
+			_wall_lost += delta
+		if is_on_floor() or _wall_lost > 0.12 or _wall_time > WALL_RUN_MAX:
+			_end_wall_run()
+	elif side_wall != Vector3.ZERO and not is_on_floor() and _wall_cooldown <= 0.0 and not ducking:
+		wall_running = true
+		_wall_normal = side_wall
+		_wall_time = 0.0
+		_wall_lost = 0.0
+		_fast_fall = false
+		_dodge_left = 0.0
+		velocity.y = maxf(velocity.y, WALL_LIFT)
+		_agitation = 1.0
+		_droplets.burst(5)
 	if global_position.y < -15.0:
 		_splat()
 		return
@@ -459,6 +514,7 @@ func _physics_process(delta: float) -> void:
 	if on_floor and not _was_on_floor:
 		if _air_time > 0.35: # a real jump, not a bump: the superhero landing
 			_land_hold = LAND_HOLD
+			_figure.land_side = "R" if randf() < 0.5 else "L"
 			speed *= 0.6 # the landing costs speed: pump back up
 		_land_splat()
 		_squash = 0.3
@@ -527,7 +583,10 @@ func _process(delta: float) -> void:
 	if _spin_left > 0.0:
 		_spin_left = maxf(_spin_left - delta, 0.0)
 		spin = Basis(_spin_axis, _spin_turn * smoothstep(0.0, 1.0, 1.0 - _spin_left / _spin_time))
-	var turn := Basis(Vector3.UP, heading) * spin * Basis(Vector3.BACK, lean)
+	# On a wall: turned onto its side, feet on the wall and body standing out from it
+	var wall_side := signf(_wall_normal.dot(right())) # +1: the wall's on the left
+	_wall_roll = lerpf(_wall_roll, wall_side * 1.25 if wall_running else 0.0, 1.0 - exp(-delta * 14.0))
+	var turn := Basis(Vector3.UP, heading) * spin * Basis(Vector3.BACK, lean + _wall_roll)
 	var middle := Vector3.UP * 0.9
 	var hop := 0.0
 	if _hop_left > 0.0:
@@ -536,13 +595,13 @@ func _process(delta: float) -> void:
 	# Splatting: squashed flat and spread wide, about its feet (so it stays on the floor)
 	var flat := Vector3(1.0 + melt * 1.1, 1.0 - melt * 0.94, 1.0 + melt * 1.5)
 	var body := turn * Basis.from_scale(stretch * flat)
-	var pivot := middle.lerp(Vector3.ZERO, melt)
+	var pivot := middle.lerp(Vector3.ZERO, maxf(melt, absf(_wall_roll) / 1.25))
 	_figure.transform = Transform3D(body, pivot - body * pivot + Vector3.UP * hop * (1.0 - melt))
-	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
+	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor() and not wall_running, velocity.y, steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
 	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
-	var liquid := not is_on_floor() or is_dashing() or _liquid_hold > 0.0
+	var liquid := (not is_on_floor() and not wall_running) or is_dashing() or _liquid_hold > 0.0
 	_figure.set_liquid(1.0 if liquid else 0.0, delta)
 
 	# Now and then, running, a blob or two shakes loose
@@ -568,7 +627,7 @@ func _process(delta: float) -> void:
 	else:
 		var contacts := _figure.feet()
 		var width := 0.16
-		if _land_hold > 0.0 and is_on_floor():
+		if _land_hold > LAND_HOLD - LAND_PLANTED and is_on_floor():
 			# The superhero landing: both feet and the hand planted, three tracks dragged along the
 			# floor (pinned down: in the pose they hover just off it, which would break them up)
 			contacts.append(_figure.hand())
@@ -678,6 +737,8 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	dead = false
 	# Pulls itself back together out of a puddle
 	_melt = 1.0
+	wall_running = false
+	_wall_roll = 0.0
 	_puddled = true
 	_pool_size = 1.0
 	speed = 0.0 # from a standstill: pumping hard

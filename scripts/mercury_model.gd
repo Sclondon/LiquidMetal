@@ -51,7 +51,9 @@ var _splash: Array[float] = []
 # The tips of the shins (left, right): where the feet are
 var _feet: Array[MeshInstance3D] = []
 var _foot_tips: Array[Vector3] = []
-var _hand: MeshInstance3D # the arm that goes down to the floor in the superhero landing
+# The superhero landing's hand on the floor: "R" or "L" (the player picks one each landing)
+var land_side := "R"
+var _hands := {} # "L"/"R" -> the arm's bouncing mesh
 var _hand_tip := Vector3.ZERO
 var _last_root := Vector3.ZERO
 var _root_velocity := Vector3.ZERO
@@ -93,8 +95,8 @@ func _ready() -> void:
 		view.mesh = null
 		view.add_child(jiggle)
 		_jiggles.append(jiggle)
-		if view.name == "arm_R":
-			_hand = jiggle
+		if view.name.begins_with("arm_"):
+			_hands[String(view.name).right(1)] = jiggle
 			_hand_tip = Vector3(0.0, box.position.y, 0.0)
 		if view.name.begins_with("shin"):
 			var tip := Vector3(0.0, box.position.y, 0.0) # the point at the bottom
@@ -180,7 +182,8 @@ func feet() -> Array[Vector3]:
 
 ## Where the landing hand's tip is, in the world
 func hand() -> Vector3:
-	return _hand.global_transform * _hand_tip if _hand else global_position
+	var arm: Node3D = _hands.get(land_side)
+	return arm.global_transform * _hand_tip if arm else global_position
 
 
 ## Something just joined this part (a droplet back, the balls setting): it ripples
@@ -277,8 +280,15 @@ func _shape_balls() -> void:
 func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float, sliding := false, landing := false, effort := 0.0) -> void:
 	var pose := "slide" if sliding else ("jump" if airborne else ("land" if landing else "run"))
 	if pose != _pose:
+		var from := _pose
 		_pose = pose
-		_anim.play(pose, 0.04 if pose == "land" else BLEND) # slammed into
+		if pose == "land":
+			_anim.play("land_" + land_side, 0.04) # slammed into
+		else:
+			_anim.play(pose, BLEND)
+			if pose == "run" and from == "land":
+				# Out of the landing's step straight into the stride: on that leg's lunge
+				_anim.seek(0.6 if land_side == "R" else 0.0, true)
 	if pose == "run":
 		# A quick pump of the legs into each lunge, then the lunge held, gliding: barely at all from
 		# a standstill, longer and longer the faster it goes. Turning, it steps (quickly) into a lunge

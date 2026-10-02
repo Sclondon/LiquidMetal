@@ -91,7 +91,8 @@ func _build_chunk(from: float, to: float) -> void:
 	_chunks.append({ end = to, node = node })
 	# Walls down both sides
 	for side in [-1.0, 1.0]:
-		_block(node, Vector3(0.6, 2.2, CHUNK), Vector3(side * (WIDTH * 0.5 + 0.3), 1.1, (from + to) * 0.5), WALL_COLOR)
+		# (tall enough to wall-run along)
+		_block(node, Vector3(0.6, 4.5, CHUNK), Vector3(side * (WIDTH * 0.5 + 0.3), 2.25, (from + to) * 0.5), WALL_COLOR)
 	# Obstacles, closer together the further in
 	while _next_obstacle > to:
 		var z := _next_obstacle
