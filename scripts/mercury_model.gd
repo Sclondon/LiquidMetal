@@ -395,17 +395,20 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		if (side == "R") == (steer > 0.0): # the inside arm on a turn: down and out to the floor
 			out = steer * 0.65 * turn_support
 		var turn := Vector3(swing * 1.0 * _arm_pump * (1.0 - turn_support) + 0.5 * absf(out), 0.0, out)
-		if side == "R" and (_cock > 0.0 or _punch > 0.0):
-			# Cocked right back and up, then thrown straight out ahead
-			var cocked := Vector3(-1.6 - (_cock - 1.0) * 0.9, 0.0, 0.35 + (_cock - 1.0) * 0.4) # (wound further)
-			var thrown := Vector3(2.55, 0.0, -0.2) # (past 90 degrees: his chest leans forward)
-			turn = turn.lerp(cocked, _cock).lerp(thrown, _punch)
+		if _cock > 0.0 or _punch > 0.0:
+			# Charging: both arms spread wide and swept back behind him (further the longer it's held);
+			# the launch claps them together out in front (aimed dead ahead in _bounce)
+			var out_sign := 1.0 if side == "R" else -1.0
+			var wind := _cock - 1.0 if _cock > 1.0 else 0.0
+			var cocked := Vector3(-1.3 - wind * 0.8, 0.0, out_sign * (1.0 + wind * 0.5))
+			var thrown := Vector3(2.55, 0.0, 0.0)
+			turn = turn.lerp(cocked, minf(_cock, 1.0)).lerp(thrown, _punch)
 		var index := _jiggles.find(arm)
 		if index >= 0:
 			_turned[index] = turn
 		if index >= 0:
 			# Punching, the arm draws out long and thin, sagging a little, like a Dali clock
-			_stretch[index] = 1.0 + 2.2 * _punch if side == "R" else 1.0
+			_stretch[index] = 1.0 + 2.2 * _punch # (both arms, grown long and pointing)
 	_bounce(_delta)
 
 
@@ -469,7 +472,7 @@ func _bounce(delta: float) -> void:
 			var thin := 1.0 / sqrt(_stretch[i])
 			shape *= Vector3(thin, _stretch[i], thin)
 		var turned := Basis.from_euler(_turned[i])
-		if _punch > 0.0 and _jiggles[i] == _hands.get("R"):
+		if _punch > 0.0 and _hands.values().has(_jiggles[i]):
 			# The punch: aimed dead ahead, whatever the body's doing (the blade hangs along -y)
 			var ahead: Vector3 = (get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z
 			var y := -ahead.normalized()
