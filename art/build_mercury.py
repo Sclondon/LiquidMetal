@@ -223,11 +223,11 @@ def key(obj, frame, rx=None, ry=None, rz=None, x=None, z=None):
     obj.keyframe_insert("rotation_euler", frame=frame)
 
 
-def ninja_arms(frame, sway=0.0, rx=-28, bob=0.0):
-    # Trailing back and well out to the sides, like a ninja run (the chest's lean takes them further
-    # back, so this is on top of that); bob lifts them, floating
+def ninja_arms(frame, sway=0.0, rx=8, bob=0.0):
+    # Out to the sides, trailing back only a little (rx is on top of the chest's forward lean,
+    # which already tips them back, so it's near zero); bob lifts them, floating
     for tag, (arm, s) in arms.items():
-        key(arm, frame, rx=rx + sway * s, ry=s * 40, z=bob)
+        key(arm, frame, rx=rx + sway * s, ry=-s * 58, z=bob)  # -s: out, away from the body
 
 
 def run_keys():
@@ -263,7 +263,7 @@ def run_keys():
     # The arms float on their own: bobbing once per push, a beat behind the body, swaying a little
     for frame in range(0, RUN_FRAMES + 1, 3):
         phase = 2 * math.pi * frame / RUN_FRAMES
-        ninja_arms(frame, sway=-16 * math.cos(phase) * 0.6, rx=-28 + 7 * math.sin(phase * 2 + 0.6), bob=0.07 * math.sin(phase * 2 - 1.2))
+        ninja_arms(frame, sway=-16 * math.cos(phase) * 0.6, rx=8 + 7 * math.sin(phase * 2 + 0.6), bob=0.07 * math.sin(phase * 2 - 1.2))
 
 
 def jump_keys():
@@ -278,7 +278,7 @@ def jump_keys():
     key(shin_l, 0, rx=-15)
     key(thigh_r, 0, rx=-20, ry=-4)
     key(shin_r, 0, rx=-10)
-    ninja_arms(0, rx=-20)
+    ninja_arms(0, rx=10)
     for frame in (5, 8):
         key(hips, frame, rx=-12, z=0.05)
         key(chest, frame, rx=-30)
@@ -287,7 +287,7 @@ def jump_keys():
         key(shin_l, frame, rx=-125)
         key(thigh_r, frame, rx=50, ry=-10)
         key(shin_r, frame, rx=-115)
-        ninja_arms(frame, rx=-40)
+        ninja_arms(frame, rx=-6)
 
 
 def bake(track_name, keyer, interpolation):
