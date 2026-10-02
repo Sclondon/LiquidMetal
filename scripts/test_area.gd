@@ -62,6 +62,8 @@ func generate(seed := 0) -> void:
 	_build_slalom(Vector3(30.0, 0.0, 100.0))
 	_build_tunnel(Vector3(-30.0, 0.0, 60.0))
 	_build_ramps()
+	_build_wall_alley(Vector3(54.0, 0.0, 40.0))
+	_build_boost_pads()
 
 
 func _process(_delta: float) -> void:
@@ -230,6 +232,8 @@ func _build_field() -> void:
 			continue
 		if Rect2(-40.0, 0.0, 20.0, 80.0).has_point(Vector2(spot.x, spot.z)):
 			continue
+		if Rect2(44.0, -25.0, 22.0, 75.0).has_point(Vector2(spot.x, spot.z)): # the wall-run alley
+			continue
 		if Rect2(-80.0, -100.0, 160.0, 40.0).has_point(Vector2(spot.x, spot.z)):
 			continue
 		var size: Vector3
@@ -264,6 +268,23 @@ func _build_tunnel(at: Vector3) -> void:
 		_block(Vector3(0.5, 1.3, length), at + Vector3(side * 3.25, 0.65, -length * 0.5), DUCK_COLOR)
 	for k in int(length / 5.0):
 		_drop(at + Vector3(0.0, -0.4, -3.0 - k * 5.0))
+
+
+## Two tall green walls 9 m apart, 60 m long, for wall running (side-dodge into one), with drops
+## along each, up where only a wall run reaches
+func _build_wall_alley(at: Vector3) -> void:
+	for side in [-1.0, 1.0]:
+		_block(Vector3(0.6, 8.0, 60.0), at + Vector3(side * 4.8, 4.0, -30.0), Color(0.2, 1.0, 0.45))
+		for k in 9:
+			_drop(at + Vector3(side * 3.9, 1.9, -8.0 - k * 5.5))
+
+
+func _build_boost_pads() -> void:
+	# At the slalom's mouth, the tunnel's, and leading into the alley
+	for spot in [Vector3(30.0, 0.0, 108.0), Vector3(-30.0, 0.0, 66.0), Vector3(54.0, 0.0, 48.0)]:
+		var pad := preload("res://scripts/boost_pad.gd").new()
+		pad.position = spot
+		_course.add_child(pad)
 
 
 func _build_ramps() -> void:

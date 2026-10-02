@@ -89,7 +89,9 @@ func _draw() -> void:
 				# Narrows to nothing as it ages, and to a point at the very start
 				var fade: float = 1.0 - point.age / LIFE
 				var start := minf(float(i) / 2.0, 1.0)
-				var half: float = point.width * 0.5 * fade * (0.4 + 0.6 * start)
+				# ...and to a point at the front, so you never see it appear
+				var front := minf(float(strip.size() - 1 - i) / 3.0, 1.0)
+				var half: float = point.width * 0.5 * fade * (0.4 + 0.6 * start) * front
 				_mesh.surface_set_normal(Vector3.UP)
 				_mesh.surface_add_vertex(point.pos + side * half)
 				_mesh.surface_set_normal(Vector3.UP)

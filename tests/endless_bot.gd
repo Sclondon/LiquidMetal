@@ -44,7 +44,7 @@ func _process(_delta: float) -> bool:
 	if splatted or main.area.distance() >= GOAL or Time.get_ticks_msec() > 150000:
 		print("ENDLESS BOT: %.0f m, speed %.1f, %s" % [main.area.distance(), player.run_speed, "splatted" if splatted else "no splats"])
 		return true
-	var pace: float = player.run_speed / 14.0
+	var pace: float = maxf(player.speed, player.run_speed) / 14.0
 	var z := player.global_position.z
 	var plan: Array = main.area.lane_plan
 	for k in plan.size():

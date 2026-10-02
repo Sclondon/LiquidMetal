@@ -5,6 +5,7 @@ extends CharacterBody3D
 
 signal splatted
 signal dashed
+signal boosted
 signal drops_changed(total: int)
 
 const GRAVITY := 42.0
@@ -67,6 +68,7 @@ const REWIND := 1.2 # seconds back along your path a splat sends you
 const DASH_BOOST := 2.2 # times run speed
 const DASH_TIME := 0.35
 const DASH_COOLDOWN := 1.2
+const BOOST := 10.0 # m/s a boost pad adds
 
 # Tunables (the HUD's tuning panel changes these live)
 var run_speed := 14.0
@@ -426,6 +428,16 @@ func _spin(axis: Vector3, turn: float, time: float) -> void:
 func _end_wall_run() -> void:
 	wall_running = false
 	_wall_cooldown = 0.35
+
+
+## A boost pad: shot forward, the speed kicked up and easing back down to running speed
+func boost() -> void:
+	if dead:
+		return
+	speed = maxf(speed, run_speed) + BOOST
+	_agitation = 1.0
+	_droplets.burst(5, 1.3)
+	boosted.emit()
 
 
 func is_dashing() -> bool:

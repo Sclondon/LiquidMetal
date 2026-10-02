@@ -19,6 +19,8 @@ const JUMP_COLOR := Color(1.0, 0.5, 0.1)
 const DUCK_COLOR := Color(0.1, 0.85, 1.0)
 const DODGE_COLOR := Color(1.0, 0.2, 0.75)
 const WALL_COLOR := Color(0.45, 0.5, 0.6)
+const WALL_RUN_COLOR := Color(0.2, 1.0, 0.45) # the tall walls made for running on
+const BoostPad := preload("res://scripts/boost_pad.gd")
 
 var start_position := Vector3(0.0, 0.0, 0.0)
 var start_heading := 0.0
@@ -89,10 +91,16 @@ func _build_chunk(from: float, to: float) -> void:
 	var node := Node3D.new()
 	add_child(node)
 	_chunks.append({ end = to, node = node })
-	# Walls down both sides
+	# Walls down both sides (tall enough to wall-run along); now and then a stretch of taller,
+	# green ones, made for it, with a line of drops along one up where only a wall run reaches
+	var tall := from < start_position.z - RUNWAY and _rng.randf() < 0.35
 	for side in [-1.0, 1.0]:
-		# (tall enough to wall-run along)
-		_block(node, Vector3(0.6, 4.5, CHUNK), Vector3(side * (WIDTH * 0.5 + 0.3), 2.25, (from + to) * 0.5), WALL_COLOR)
+		var height := 8.0 if tall else 4.5
+		_block(node, Vector3(0.6, height, CHUNK), Vector3(side * (WIDTH * 0.5 + 0.3), height * 0.5, (from + to) * 0.5), WALL_RUN_COLOR if tall else WALL_COLOR)
+	if tall:
+		var side := -1.0 if _rng.randf() < 0.5 else 1.0
+		for k in 8:
+			_drop(node, Vector3(side * (WIDTH * 0.5 - 0.6), 1.9, from - 8.0 - k * 5.0))
 	# Obstacles, closer together the further in
 	while _next_obstacle > to:
 		var z := _next_obstacle
@@ -104,10 +112,16 @@ func _build_chunk(from: float, to: float) -> void:
 		_obstacle(node, kind, z)
 		for k in 3:
 			_drop(node, Vector3(_rng.randf_range(-2.0, 2.0) if k == 0 else 0.0, 0.0, z + 8.0 + k * 2.5))
+		# Now and then a boost pad, just past the obstacle
+		if _rng.randf() < 0.22:
+			var pad := BoostPad.new()
+			pad.position = Vector3(_rng.randf_range(-2.5, 2.5), 0.0, z - 5.0)
+			node.add_child(pad)
 		var hard := clampf((start_position.z - z) / HARD_AT, 0.0, 1.0)
 		var gap := lerpf(GAP_EASY, GAP_HARD, hard) * _rng.randf_range(0.9, 1.15)
 		if kind == "hurdle_pair":
-			gap += 10.0 # room to land off the second hurdle before the next thing
+			gap += 10.0
+		gap += 4.0 # (room for a boost to settle) # room to land off the second hurdle before the next thing
 		_next_obstacle -= gap
 
 
