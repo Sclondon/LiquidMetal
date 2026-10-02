@@ -5,6 +5,7 @@ extends Node3D
 ## dodges and dashes.
 
 signal rejoined(part: Node3D) # a blob merged back in
+signal splatted(point: Vector3, normal: Vector3) # a blob hit something and splatted on it
 
 const MAX := 32
 const FREE_TIME := 0.45 # seconds of free flight before the pull back starts
@@ -59,6 +60,29 @@ func burst(count: int, strength := 1.0) -> void:
 		})
 
 
+## Blobs starting from a spot in the world (a puddle on the floor lifting off as it jumps), each
+## heading back to the nearest body part
+func burst_at(at: Vector3, count: int) -> void:
+	if parts.is_empty():
+		return
+	for i in count:
+		if _pool.is_empty():
+			return
+		var part: Node3D = parts[0]
+		for p in parts:
+			if p.global_position.distance_to(at) < part.global_position.distance_to(at):
+				part = p
+		var view: MeshInstance3D = _pool.pop_back()
+		view.visible = true
+		var size := randf_range(0.5, 0.9)
+		view.scale = Vector3.ONE * size
+		view.global_position = at + Vector3.UP * 0.05
+		_live.append({
+			view = view, part = part, offset = Vector3.ZERO, size = size, age = FREE_TIME,
+			velocity = source.velocity + Vector3(randf_range(-1.0, 1.0), randf_range(1.0, 3.0), randf_range(-1.0, 1.0)),
+		})
+
+
 ## Everything back in at once (a splat, a respawn)
 func clear() -> void:
 	for drop in _live:
@@ -87,9 +111,12 @@ func _process(delta: float) -> void:
 		ray.exclude = [source.get_rid()]
 		var hit := get_world_3d().direct_space_state.intersect_ray(ray)
 		if not hit.is_empty():
-			var normal: Vector3 = hit.normal
-			to = hit.position + normal * 0.04
-			velocity = velocity.slide(normal) * 0.6 + normal * maxf(-velocity.dot(normal), 0.0) * 0.25
+			# Splat: it's gone, left as a little splash on whatever it hit
+			splatted.emit(hit.position, hit.normal)
+			view.visible = false
+			_pool.append(view)
+			_live.remove_at(i)
+			continue
 		drop.velocity = velocity
 		view.global_position = to
 		# Stretched along its motion, like a drop of liquid

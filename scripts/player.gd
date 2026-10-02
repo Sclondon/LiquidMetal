@@ -109,6 +109,9 @@ var _collider := CollisionShape3D.new()
 var _blob := MeshInstance3D.new() # the puddle it melts into
 var _puddle_eyes: Array[MeshInstance3D] = []
 var _puddled := false # flat as a puddle (past the splat)
+var _sink := 0.0 # 0 in the dive pose .. 1 sunk right into the puddle
+const SINK_DELAY := 0.4 # seconds ducking before he sinks into it
+var _pool_offset := Vector3.ZERO # where the puddle sits under him
 var _clock := 0.0
 var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
@@ -210,6 +213,7 @@ func _ready() -> void:
 	add_child(_droplets)
 	_droplets.parts = _figure.parts()
 	_droplets.rejoined.connect(func(part): _figure.ripple(part, 0.7))
+	_droplets.splatted.connect(func(point, normal): _dab(point, -1, 0.0, 0.3, normal, 0.4))
 	_figure.pooled.connect(func(): _puddle_splash = 1.0)
 	_material.set_shader_parameter("splash_up", true)
 	_material.set_shader_parameter("splash_strength", 0.1)
@@ -376,6 +380,7 @@ func _on_jump() -> void:
 	if ducking:
 		return # wedged under something: no room to spring up
 	velocity.y = sqrt(2.0 * GRAVITY * jump_height)
+	_lift_dabs()
 	_squash = -0.25 # a stretch on take-off
 	_agitation = 1.0
 	_liquid_hold = 0.2
@@ -537,9 +542,12 @@ func _physics_process(delta: float) -> void:
 			_land_hold = LAND_HOLD
 			_figure.land_side = "R" if randf() < 0.5 else "L"
 			# Little puddles where it touches down: both feet, then the hand
+			# Puddles left behind where it touched down, and smaller ones that follow the feet (and
+			# the hand) along until they're lifted
 			var feet := _figure.feet()
 			for f in feet.size():
-				_dab(feet[f], f)
+				_dab(feet[f], -1, 0.0, 1.0, Vector3.UP, 0.9)
+				_dab(feet[f], f, 0.0, 0.45, Vector3.UP, 0.7)
 			_dab_hand = 0.12
 			speed *= 0.6 # the landing costs speed: pump back up
 		_land_splat()
@@ -580,6 +588,8 @@ func _process(delta: float) -> void:
 	var puddle := ducking and _slide_clock > HOP_TIME * 0.8
 	_melt = move_toward(_melt, 1.0 if puddle else 0.0, delta * (SPLAT_RATE if puddle else POP_RATE))
 	var melt := _melt * _melt # eases in: slow to start, then slapped flat
+	# After a beat in the dive he sinks right down into the puddle, which swells
+	_sink = move_toward(_sink, 1.0 if ducking and _slide_clock > SINK_DELAY else 0.0, delta * (4.0 if ducking else 6.0))
 	if _melt > 0.7 and not _puddled:
 		# The puddle spreads out under him (with a little overshoot), while he holds the dive
 		_puddled = true
@@ -599,7 +609,7 @@ func _process(delta: float) -> void:
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
 	if is_dashing():
 		stretch *= Vector3(0.88, 0.92, 1.35) # drawn out along the dash
-	_figure.visible = true
+	_figure.visible = _sink < 0.95
 	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself), and
 	# flipping or twirling about its middle during a move
 	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
@@ -609,7 +619,8 @@ func _process(delta: float) -> void:
 		spin = Basis(_spin_axis, _spin_turn * smoothstep(0.0, 1.0, 1.0 - _spin_left / _spin_time))
 	# On a wall: turned onto its side, feet on the wall and body standing out from it
 	var wall_side := signf(_wall_normal.dot(right())) # +1: the wall's on the left
-	_wall_roll = lerpf(_wall_roll, wall_side * 1.25 if wall_running else 0.0, 1.0 - exp(-delta * 14.0))
+	# On a wall: sliding along it like a sharp turn, leaning in with the wall-side hand on it
+	_wall_roll = lerpf(_wall_roll, -wall_side * 0.35 if wall_running else 0.0, 1.0 - exp(-delta * 10.0))
 	var turn := Basis(Vector3.UP, heading) * spin * Basis(Vector3.BACK, lean + _wall_roll)
 	var middle := Vector3.UP * 0.9
 	var hop := 0.0
@@ -617,11 +628,13 @@ func _process(delta: float) -> void:
 		_hop_left = maxf(_hop_left - delta, 0.0)
 		hop = sin(PI * (1.0 - _hop_left / HOP_TIME)) * HOP_HEIGHT
 	# Splatting: squashed flat and spread wide, about its feet (so it stays on the floor)
-	var flat := Vector3(1.0, 1.0 - melt * 0.25, 1.0) # held low in the dive
+	var sunk := smoothstep(0.0, 1.0, _sink)
+	var flat := Vector3(1.0 + sunk * 0.5, (1.0 - melt * 0.25) * (1.0 - sunk * 0.95), 1.0 + sunk * 0.5) # held low in the dive, then sinking in
 	var body := turn * Basis.from_scale(stretch * flat)
-	var pivot := middle.lerp(Vector3.ZERO, maxf(melt, absf(_wall_roll) / 1.25))
+	var pivot := middle.lerp(Vector3.ZERO, melt)
 	_figure.transform = Transform3D(body, pivot - body * pivot + Vector3.UP * hop * (1.0 - melt))
-	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor() and not wall_running, velocity.y, steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
+	var pose_steer := -wall_side if wall_running else steer # (on a wall: turning into it)
+	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor() and not wall_running, velocity.y, pose_steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
 	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
@@ -658,15 +671,21 @@ func _process(delta: float) -> void:
 			var follow: int = dab.get_meta("follow", -1)
 			if dab.visible and follow >= 0:
 				var at: Vector3 = _figure.hand() if follow == 2 else feet_now[mini(follow, feet_now.size() - 1)]
+				if at.y - global_position.y > 0.2:
+					# Lifted off the floor: its puddle goes
+					dab.set_meta("follow", -1)
+					dab.visible = false
+					continue
 				dab.global_position = Vector3(at.x, global_position.y + 0.01, at.z)
 		if _dab_hand > 0.0:
 			_dab_hand -= delta
 			if _dab_hand <= 0.0:
-				_dab(_figure.hand(), 2)
+				_dab(_figure.hand(), -1, 0.0, 1.0, Vector3.UP, 0.9)
+				_dab(_figure.hand(), 2, 0.0, 0.45, Vector3.UP, 0.7)
 		# A sharp turn at speed: the inside hand down on the floor, holding it up
 		var sharp := absf(steer) > 0.85 and is_on_floor() and speed > 8.0 and _land_hold <= 0.0 and not ducking
 		_support = move_toward(_support, 1.0 if sharp else 0.0, delta * 5.0)
-		_figure.turn_support = _support
+		_figure.turn_support = 1.0 if wall_running else _support
 		if _support > 0.6:
 			var hand := _figure.hand("R" if steer > 0.0 else "L")
 			contacts.append(Vector3(hand.x, global_position.y, hand.z))
@@ -683,7 +702,7 @@ func _process(delta: float) -> void:
 
 	# The puddle: one long drop of metal skimming along, on a wobbly spring (it overshoots on the
 	# splat and as it gathers back up), stretched out the faster it goes
-	var pooled_target := 1.0 if _puddled else 0.0
+	var pooled_target := (0.55 + 0.6 * smoothstep(0.0, 1.0, _sink)) if _puddled else 0.0 # small, then bigger as he sinks in
 	# (stepped in small fixed slices: a stiff spring blows up on a long frame otherwise)
 	var left := delta
 	while left > 0.0:
@@ -698,8 +717,17 @@ func _process(delta: float) -> void:
 	_puddle_splash = move_toward(_puddle_splash, 0.0, delta * 1.2)
 	_material.set_shader_parameter("splash", _puddle_splash)
 	var long := 1.0 + clampf(speed / 20.0, 0.0, 1.0) * 0.8
+	# Under the middle of him (the dive pose throws his weight forward of his feet)
+	if _blob.visible and _figure.visible:
+		var centre := Vector3.ZERO
+		for part in _figure.parts():
+			centre += part.global_position
+		centre /= maxf(_figure.parts().size(), 1)
+		_pool_offset = to_local(centre) * Vector3(1.0, 0.0, 1.0)
+	elif not _blob.visible:
+		_pool_offset = Vector3.ZERO
 	_blob.scale = Vector3(1.25 * (1.0 + wobble * 0.5 + ripple), 0.32 * maxf(1.0 - wobble - ripple, 0.3), 1.4 * long * (1.0 + wobble * 0.3 - ripple)) * maxf(pooled, 0.01)
-	_blob.position.y = BLOB_RADIUS * _blob.scale.y
+	_blob.position = Vector3(_pool_offset.x, BLOB_RADIUS * _blob.scale.y, _pool_offset.z)
 	_blob.rotation = Vector3(0.0, heading, lean)
 	# Eyes peeking out of the front of it
 	for eye in _puddle_eyes:
@@ -712,9 +740,18 @@ func _process(delta: float) -> void:
 
 
 ## Landing: a splash of metal particles thrown up from the feet and fanned out along the floor
+## Jumping off: the puddles following the feet lift off as little balls that follow along
+func _lift_dabs() -> void:
+	for dab in _dabs:
+		if dab.visible and int(dab.get_meta("follow", -1)) >= 0:
+			_droplets.burst_at(dab.global_position, 2)
+			dab.set_meta("follow", -1)
+			dab.visible = false
+
+
 ## A little puddle on the floor under a contact point of the superhero landing (follow: 0 / 1 the
 ## left / right foot, 2 the hand), carried along under it as it slides
-func _dab(at: Vector3, follow := -1, delay := 0.0) -> void:
+func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := Vector3.UP, linger := 0.5) -> void:
 	var dab: MeshInstance3D = null
 	for d in _dabs:
 		if not d.visible:
@@ -728,20 +765,24 @@ func _dab(at: Vector3, follow := -1, delay := 0.0) -> void:
 		dab.visible = false
 		add_child(dab)
 		_dabs.append(dab)
-	var spot := Vector3(at.x, global_position.y + 0.01, at.z)
+	var spot := Vector3(at.x, global_position.y + 0.01, at.z) if normal == Vector3.UP else at + normal * 0.02
+	var face := Basis.IDENTITY
+	if normal != Vector3.UP:
+		var across := normal.cross(Vector3.UP if absf(normal.y) < 0.95 else Vector3.RIGHT).normalized()
+		face = Basis(across, normal, across.cross(normal))
 	# Taken now (shown, too small to see), so another dab this frame doesn't take the same one
 	dab.visible = true
 	dab.set_meta("follow", follow)
 	dab.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * 0.001), spot)
-	var size := randf_range(0.5, 0.75)
+	var size := randf_range(0.5, 0.75) * size_scale
 	var tween := create_tween()
 	if delay > 0.0:
 		tween.tween_interval(delay)
 	tween.tween_callback(func():
-		dab.global_transform = Transform3D(Basis(Vector3.UP, randf() * TAU).scaled_local(Vector3(0.05, 0.02, 0.05)), spot)
+		dab.global_transform = Transform3D((face * Basis(Vector3.UP, randf() * TAU)).scaled_local(Vector3(0.05, 0.02, 0.05)), spot)
 	)
 	tween.tween_property(dab, "scale", Vector3(size, 0.08, size * randf_range(0.8, 1.3)), 0.25).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
-	tween.tween_interval(0.5)
+	tween.tween_interval(linger)
 	tween.tween_property(dab, "scale", Vector3(0.01, 0.01, 0.01), 0.6).set_ease(Tween.EASE_IN)
 	tween.tween_callback(func(): dab.visible = false)
 
@@ -852,7 +893,7 @@ func _wall_puddle(point: Vector3, normal: Vector3) -> void:
 		var spot := _on_surface(centre, centre + across * side * randf_range(0.55, 1.35) + Vector3.UP * randf_range(-0.35, 0.7), flat)
 		var tilt := Basis(flat, randf_range(-PI, PI)) * facing # stretched out at any angle
 		arm.global_transform = Transform3D(tilt.scaled_local(Vector3(0.05, 0.05, 0.05)), spot)
-		var delay := randf_range(0.06, 0.2) + i * randf_range(0.04, 0.25)
+		var delay := randf_range(0.03, 0.08) + i * randf_range(0.02, 0.08)
 		var size := randf_range(0.75, 1.3)
 		var drip := randf_range(0.15, 0.9)
 		# The arm itself flies off the body into the wall and turns into the splat where it lands
