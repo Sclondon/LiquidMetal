@@ -18,7 +18,9 @@ var shots := [
 	[2.45, "behind", Vector3(0.0, 1.6, -3.4)],
 	[2.6, "jump", Vector3(3.6, 1.6, 1.0)],
 	[3.25, "duck", Vector3(2.8, 1.3, 1.0)],
-	[3.9, "dash_ball", Vector3(3.0, 1.3, 1.5)],
+	[4.37, "dash_cock", Vector3(3.2, 1.2, 0.0)],
+	[4.6, "dash_punch", Vector3(3.2, 1.2, 0.0)],
+	[4.75, "dash_punch2", Vector3(3.2, 1.2, 0.0)],
 ]
 
 
@@ -55,7 +57,7 @@ func _process(delta: float) -> bool:
 	if t >= 3.1 and not taken.has("d"):
 		taken.d = true
 		player.input.duck.emit()
-	if t >= 3.8 and not taken.has("dash_go"):
+	if t >= 4.2 and not taken.has("dash_go"):
 		taken.dash_go = true
 		player.input.dash.emit()
 	var out: String = OS.get_cmdline_user_args()[0]
@@ -63,4 +65,4 @@ func _process(delta: float) -> bool:
 		if t >= s[0] and not taken.has(s[1]):
 			taken[s[1]] = true
 			root.get_texture().get_image().save_png("%s/%s.png" % [out, s[1]])
-	return t > 4.0
+	return t > 4.85

@@ -50,7 +50,11 @@ var _clock := 0.0
 var _head_jiggle: Node3D
 var _arm_pump := 0.0
 var _kick_left := 0.0 # a dash kicking off: one quick switch of legs
-var _kick_to := 0.0 # the lunge it switches into
+var _kick_rate := 0.0 # how fast the kick's two steps play
+var _cock := 0.0
+var _punch := 0.0
+var _stretch: Array[float] = []
+var _turned: Array[Vector3] = [] # per part: its own extra turn (euler), kept here, not read back off a scaled basis # per part: drawn out along its length (the punching arm)
 ## Something nearby to look at (the player picks it; INF: nothing)
 var look_point := Vector3.INF
 var _look_yaw := 0.0
@@ -143,6 +147,8 @@ func _ready() -> void:
 		own.set_shader_parameter("ball_radius", clampf(box.size.length() * 0.24, 0.1, 0.3))
 		_deform.append(deform)
 		_splash.append(0.0)
+		_stretch.append(1.0)
+		_turned.append(Vector3.ZERO)
 		var ball := MeshInstance3D.new()
 		ball.mesh = ball_mesh
 		ball.material_override = _ball_material
@@ -220,8 +226,16 @@ func ripple_all(amount := 1.0) -> void:
 ## A dash kicking off: a quick switch of legs into the other lunge, held till the twirl
 func kick(time: float) -> void:
 	_kick_left = time
+	# Two quick steps: on through the next lunge to the one after it
 	var at := fmod(_anim.current_animation_position, 1.2)
-	_kick_to = 0.6 if at < 0.6 else 0.0
+	var to_next := fmod((0.6 if at < 0.6 else 1.2) - at + 1.2, 1.2)
+	_kick_rate = (to_next + 0.6) / maxf(time - 0.04, 0.05)
+
+
+## The dash's punch: cock 0..1 the right arm drawn back, punch 0..1 thrown forward and stretched
+func set_punch(cock: float, punch: float) -> void:
+	_cock = cock
+	_punch = punch
 
 
 ## Set a liquid-metal shader setting on every part, ball and the base material
@@ -345,8 +359,9 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 					rate = 0.0 # into the turn: held right there till it straightens out
 		if _kick_left > 0.0:
 			_kick_left -= _delta
-			var left := fmod(_kick_to - fmod(_anim.current_animation_position, 1.2) + 1.2, 1.2)
-			rate = 0.0 if left < 0.03 or left > 1.1 else left / maxf(_kick_left - 0.06, 0.04) # there, then held
+			rate = _kick_rate if _kick_left > 0.04 else 0.0
+		if _punch > 0.3:
+			rate = 0.0 # held in the lunge while the punch carries him
 		_anim.speed_scale = rate
 	else:
 		_anim.speed_scale = 1.0
@@ -369,7 +384,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			var local := _model.global_basis.inverse() * (look_point - _head_jiggle.global_position)
 			want = clampf(atan2(-local.x, -local.z), -1.0, 1.0)
 		_look_yaw = lerpf(_look_yaw, want, 1.0 - exp(-_delta * 5.0))
-		_head_jiggle.rotation = Vector3(0.0, -steer * 0.7 + stride * 0.16 + _look_yaw, 0.0)
+		_turned[_jiggles.find(_head_jiggle)] = Vector3(0.0, -steer * 0.7 + stride * 0.16 + _look_yaw, 0.0)
 	# Slow (getting up to speed): the arms pump hard, each against its leg; gone by full speed
 	var pump := clampf(maxf(effort, (10.0 - speed) / 6.0), 0.0, 1.0) * (1.0 if pose == "run" else 0.0)
 	_arm_pump = lerpf(_arm_pump, pump, 1.0 - exp(-_delta * 6.0))
@@ -379,7 +394,18 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		var out := 0.0
 		if (side == "R") == (steer > 0.0): # the inside arm on a turn: down and out to the floor
 			out = steer * 0.65 * turn_support
-		arm.rotation = Vector3(swing * 1.0 * _arm_pump * (1.0 - turn_support) + 0.5 * absf(out), 0.0, out)
+		var turn := Vector3(swing * 1.0 * _arm_pump * (1.0 - turn_support) + 0.5 * absf(out), 0.0, out)
+		if side == "R" and (_cock > 0.0 or _punch > 0.0):
+			# Cocked right back and up, then thrown straight out ahead
+			var cocked := Vector3(-1.6, 0.0, 0.35)
+			var thrown := Vector3(2.55, 0.0, -0.2) # (past 90 degrees: his chest leans forward)
+			turn = turn.lerp(cocked, _cock).lerp(thrown, _punch)
+		var index := _jiggles.find(arm)
+		if index >= 0:
+			_turned[index] = turn
+		if index >= 0:
+			# Punching, the arm draws out long and thin, sagging a little, like a Dali clock
+			_stretch[index] = 1.0 + 2.2 * _punch if side == "R" else 1.0
 	_bounce(_delta)
 
 
@@ -439,5 +465,8 @@ func _bounce(delta: float) -> void:
 			var wob := sin(_clock * 17.0 + i * 1.7) * 0.22 * jelly
 			var wob2 := sin(_clock * 13.0 + i * 2.9) * 0.16 * jelly
 			shape *= Vector3(1.0 + wob, 1.0 - wob + wob2, 1.0 - wob2)
-		_jiggles[i].basis = Basis.from_euler(_jiggles[i].rotation) * Basis.from_scale(shape) # (keeps the head's look)
+		if _stretch[i] != 1.0:
+			var thin := 1.0 / sqrt(_stretch[i])
+			shape *= Vector3(thin, _stretch[i], thin)
+		_jiggles[i].basis = Basis.from_euler(_turned[i]) * Basis.from_scale(shape) # (keeps the head's look)
 	_springs_ready = true

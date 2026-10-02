@@ -74,7 +74,7 @@ const REWIND := 1.2 # seconds back along your path a splat sends you
 const DASH_BOOST := 2.2 # times run speed
 const DASH_TIME := 0.35
 const DASH_COOLDOWN := 1.2
-const DASH_KICK := 0.2 # the stride kicking off a dash, before the twirl
+const DASH_KICK := 0.3 # the two quick steps (and the arm cocking back) before the punch launches the dash
 const BOOST := 10.0 # m/s a boost pad adds
 
 # Tunables (the HUD's tuning panel changes these live)
@@ -122,7 +122,8 @@ const SINK_DELAY := 0.4 # seconds ducking before he sinks into it
 var _pool_offset := Vector3.ZERO # where the puddle sits under him
 var _look_clock := 0.0
 var _bounce_t := 9.0
-var _dash_kick := 0.0 # seconds since snapping back up out of the puddle
+var _dash_kick := 0.0
+var _punch := 0.0 # the dash's punch: 0 .. 1 arm out # seconds since snapping back up out of the puddle
 var _clock := 0.0
 var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
@@ -483,14 +484,12 @@ func is_dashing() -> bool:
 func _on_dash() -> void:
 	if dead or dash_cooldown > 0.0:
 		return
-	_dash_left = DASH_TIME + DASH_KICK
 	dash_cooldown = DASH_COOLDOWN
 	_agitation = 1.0
-	# First the kick-off: one hard, quick stride (the speed's already coming); then the twirl,
-	# going to jelly
+	# The dash is a punch: two quick steps while the right arm cocks back, then it punches
+	# forward and the punch launches him, the arm stretching out long (see the kick's end below)
 	_dash_kick = DASH_KICK
 	_figure.kick(DASH_KICK)
-	_droplets.burst(3, 1.0)
 	dashed.emit()
 
 
@@ -693,7 +692,7 @@ func _process(delta: float) -> void:
 	_figure.transform = Transform3D(body, (pivot - body * pivot + Vector3.UP * hop * (1.0 - melt)).lerp(wall_spot, smoothstep(0.0, 1.0, _wall_roll)))
 	var pose_steer := 0.0 if wall_running else steer
 	_look_around(delta)
-	var tucked := (not is_on_floor() and not wall_running) or _dodge_left > 0.0 or (is_dashing() and _dash_kick <= 0.0)
+	var tucked := (not is_on_floor() and not wall_running) or _dodge_left > 0.0
 	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), tucked, velocity.y, pose_steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
 	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
@@ -701,10 +700,15 @@ func _process(delta: float) -> void:
 	if _dash_kick > 0.0:
 		_dash_kick -= delta
 		if _dash_kick <= 0.0:
-			_liquid_hold = DASH_TIME + 0.1
-			_trick("dash", 1.0, DASH_TIME + 0.05)
+			# The punch: launched
+			_dash_left = DASH_TIME
 			_droplets.burst(5, 1.3)
-	var liquid := (not is_on_floor() and not wall_running) or (is_dashing() and _dash_kick <= 0.0) or _liquid_hold > 0.0
+	# The right arm: cocked back through the steps, punched out (and stretched) through the dash,
+	# then springing back
+	var cock := 1.0 - _dash_kick / DASH_KICK if _dash_kick > 0.0 else 0.0
+	_punch = move_toward(_punch, 1.0 if is_dashing() else 0.0, delta * (14.0 if is_dashing() else 4.0))
+	_figure.set_punch(cock, _punch)
+	var liquid := (not is_on_floor() and not wall_running) or _liquid_hold > 0.0
 	_figure.set_liquid(1.0 if liquid else 0.0, delta)
 
 	# Now and then, running, a blob or two shakes loose
@@ -774,7 +778,7 @@ func _process(delta: float) -> void:
 				_dab(_figure.hand(), -1, 0.0, 1.0, Vector3.UP, 0.9)
 				_dab(_figure.hand(), 2, 0.0, 0.45, Vector3.UP, 0.7)
 		# A sharp turn at speed: the inside hand down on the floor, holding it up
-		var sharp := absf(steer) > 0.85 and is_on_floor() and speed > 8.0 and _land_hold <= 0.0 and not ducking
+		var sharp := absf(steer) > 0.85 and is_on_floor() and speed > 8.0 and _land_hold <= 0.0 and not ducking and _spin_left <= 0.0 and _punch < 0.1 and _dodge_left <= 0.0
 		_support = move_toward(_support, 1.0 if sharp else 0.0, delta * 5.0)
 		_figure.turn_support = 0.0 if wall_running else _support
 		if _support > 0.6:

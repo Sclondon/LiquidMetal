@@ -69,15 +69,15 @@ func _process(delta: float) -> bool:
 				_button(JOY_BUTTON_X)
 				step = 7
 		7:
-			if t > 3.85:
+			if t > 4.2: # (the punch launches it after two quick steps)
 				_check("X dashes", p.is_dashing())
 				step = 8
 		8:
-			if t > 4.5:
+			if t > 4.7:
 				_button(JOY_BUTTON_START)
 				step = 9
 		9:
-			if t > 4.6:
+			if t > 4.8:
 				_check("Start goes to the menu", main.mode == "menu")
 				for line in log:
 					print(line)
