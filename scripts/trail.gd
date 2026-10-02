@@ -22,7 +22,9 @@ func _ready() -> void:
 
 
 ## feet: where each foot is; floor: the height of the ground under them (NAN: in the air)
-func step(feet: Array[Vector3], floor: float, width: float, delta: float) -> void:
+## (On a wall: normal is the wall's, and plane a point on it; floor is ignored then)
+func step(feet: Array[Vector3], floor: float, width: float, delta: float, normal := Vector3.UP, plane := Vector3.ZERO) -> void:
+	var on_wall := normal != Vector3.UP
 	while _strips.size() < feet.size():
 		_strips.append([])
 		_down.append(false)
@@ -31,15 +33,16 @@ func step(feet: Array[Vector3], floor: float, width: float, delta: float) -> voi
 			_down[f] = false # this contact point isn't touching now
 			continue
 		var foot := feet[f]
-		var touching := not is_nan(floor) and foot.y - floor < CONTACT
+		var height := (foot - plane).dot(normal) if on_wall else foot.y - floor
+		var touching := (on_wall or not is_nan(floor)) and height < CONTACT
 		var strips: Array = _strips[f]
 		if touching:
-			var spot := Vector3(foot.x, floor + 0.012, foot.z)
+			var spot := foot - normal * (height - 0.012) if on_wall else Vector3(foot.x, floor + 0.012, foot.z)
 			if not _down[f]:
 				strips.append([]) # landed: a new piece of track
 			var strip: Array = strips.back()
 			if strip.size() < 2 or strip[strip.size() - 2].pos.distance_to(spot) > STEP:
-				strip.append({ pos = spot, age = 0.0, width = width })
+				strip.append({ pos = spot, age = 0.0, width = width, normal = normal })
 			else:
 				strip.back().pos = spot # the end of the track stays right under the foot
 		_down[f] = touching
@@ -82,18 +85,19 @@ func _draw() -> void:
 				var point: Dictionary = strip[i]
 				var before: Vector3 = strip[maxi(i - 1, 0)].pos
 				var after: Vector3 = strip[mini(i + 1, strip.size() - 1)].pos
-				var along := Vector3(after.x - before.x, 0.0, after.z - before.z)
+				var up: Vector3 = point.get("normal", Vector3.UP)
+				var along := (after - before) - up * (after - before).dot(up)
 				if along.length_squared() < 1e-6:
-					along = Vector3.FORWARD
-				var side := along.normalized().cross(Vector3.UP)
+					along = Vector3.FORWARD.cross(up).cross(up) if absf(up.y) < 0.9 else Vector3.FORWARD
+				var side := along.normalized().cross(up)
 				# Narrows to nothing as it ages, and to a point at the very start
 				var fade: float = 1.0 - point.age / LIFE
 				var start := minf(float(i) / 2.0, 1.0)
 				# ...and to a point at the front, so you never see it appear
 				var front := minf(float(strip.size() - 1 - i) / 3.0, 1.0)
 				var half: float = point.width * 0.5 * fade * (0.4 + 0.6 * start) * front
-				_mesh.surface_set_normal(Vector3.UP)
+				_mesh.surface_set_normal(up)
 				_mesh.surface_add_vertex(point.pos + side * half)
-				_mesh.surface_set_normal(Vector3.UP)
+				_mesh.surface_set_normal(up)
 				_mesh.surface_add_vertex(point.pos - side * half)
 			_mesh.surface_end()

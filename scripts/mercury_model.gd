@@ -49,6 +49,9 @@ var _springs_ready := false
 var _clock := 0.0
 var _head_jiggle: Node3D
 var _arm_pump := 0.0
+## Something nearby to look at (the player picks it; INF: nothing)
+var look_point := Vector3.INF
+var _look_yaw := 0.0
 ## 0..1: the inside hand reaching down to the floor on a sharp turn (the player sets it)
 var turn_support := 0.0
 var _turn_sign := 0.0 # which way it last turned
@@ -347,7 +350,13 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		phase = _anim.current_animation_position / maxf(_anim.current_animation_length, 0.01)
 	var stride := sin(phase * TAU) if pose == "run" else 0.0
 	if _head_jiggle:
-		_head_jiggle.rotation = Vector3(0.0, -steer * 0.7 + stride * 0.16, 0.0)
+		# Turning his head to look at what's near (an obstacle coming, a drop to grab)
+		var want := 0.0
+		if look_point != Vector3.INF:
+			var local := _model.global_basis.inverse() * (look_point - _head_jiggle.global_position)
+			want = clampf(atan2(-local.x, -local.z), -1.0, 1.0)
+		_look_yaw = lerpf(_look_yaw, want, 1.0 - exp(-_delta * 5.0))
+		_head_jiggle.rotation = Vector3(0.0, -steer * 0.7 + stride * 0.16 + _look_yaw, 0.0)
 	# Slow (getting up to speed): the arms pump hard, each against its leg; gone by full speed
 	var pump := clampf(maxf(effort, (10.0 - speed) / 6.0), 0.0, 1.0) * (1.0 if pose == "run" else 0.0)
 	_arm_pump = lerpf(_arm_pump, pump, 1.0 - exp(-_delta * 6.0))

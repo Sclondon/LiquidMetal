@@ -23,8 +23,8 @@ func _process(delta: float) -> bool:
 	var cam: Camera3D = main.cam
 	cam.target = null
 	var at: Vector3 = p.get_global_transform_interpolated().origin
-	cam.global_position = at + Vector3(-3.0, 0.6, -2.4)
-	cam.look_at(at + Vector3(0.0, 0.8, 0.0))
+	cam.global_position = at + Vector3(-1.8, 1.6, 4.5)
+	cam.look_at(at + Vector3(0.8, 0.9, -1.5))
 	cam.fov = 55.0
 	if step == 0 and t > 0.8:
 		p.input.jump.emit()
