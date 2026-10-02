@@ -100,12 +100,9 @@ var _spin_left := 0.0
 var _last_trick := {}
 var _hop_left := 0.0
 var _jump_buffer := 0.0
-# The splat on landing: metal thrown out from the feet and a rippling puddle spreading under it
-const LAND_TIME := 0.45
+# The splat on landing: particles of metal thrown up and out from the feet, and skittering along the floor
 var _land_spray := CPUParticles3D.new()
-var _land_pool := MeshInstance3D.new()
-var _land_material: ShaderMaterial
-var _land_left := 0.0
+var _land_skid := CPUParticles3D.new()
 const LAND_HOLD := 0.45 # seconds the superhero landing is held
 var _land_hold := 0.0
 var _air_time := 0.0
@@ -198,7 +195,7 @@ func _ready() -> void:
 	add_child(_feet)
 
 	_land_spray.mesh = splash
-	_land_spray.amount = 28
+	_land_spray.amount = 44
 	_land_spray.lifetime = 0.55
 	_land_spray.one_shot = true
 	_land_spray.explosiveness = 1.0
@@ -218,18 +215,26 @@ func _ready() -> void:
 	_land_spray.scale_amount_max = 1.8
 	_land_spray.position.y = 0.05
 	add_child(_land_spray)
-	var pool := SphereMesh.new()
-	pool.radius = 1.0
-	pool.height = 2.0
-	pool.radial_segments = 32
-	pool.rings = 8
-	_land_pool.mesh = pool
-	_land_material = _material.duplicate()
-	_land_pool.material_override = _land_material
-	_land_pool.top_level = true
-	_land_pool.visible = false
-	_land_pool.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
-	add_child(_land_pool)
+	# ...and a burst skittering out low along the floor all round
+	_land_skid.mesh = splash
+	_land_skid.amount = 36
+	_land_skid.lifetime = 0.45
+	_land_skid.one_shot = true
+	_land_skid.explosiveness = 1.0
+	_land_skid.emitting = false
+	_land_skid.local_coords = false
+	_land_skid.direction = Vector3(1, 0.15, 0)
+	_land_skid.spread = 180.0
+	_land_skid.flatness = 0.9 # fanned out flat, every way round
+	_land_skid.initial_velocity_min = 4.0
+	_land_skid.initial_velocity_max = 8.0
+	_land_skid.damping_min = 6.0
+	_land_skid.damping_max = 10.0
+	_land_skid.gravity = Vector3(0, -GRAVITY * 0.5, 0)
+	_land_skid.scale_amount_min = 0.5
+	_land_skid.scale_amount_max = 1.3
+	_land_skid.position.y = 0.06
+	add_child(_land_skid)
 
 	_probe.size = Vector3(90.0, 30.0, 90.0)
 	_probe.position = Vector3(0.0, 1.2, 0.0)
@@ -500,7 +505,6 @@ func _process(delta: float) -> void:
 		_drip_clock = randf_range(0.15, 0.45)
 		_droplets.burst(randi_range(1, 2), 0.7)
 
-	_update_land_splat(delta)
 	# Splashing at its feet while it runs on the ground, and a track under each foot
 	var running := is_on_floor() and melt < 0.5 and not dead
 	_feet.emitting = running
@@ -524,23 +528,10 @@ func _process(delta: float) -> void:
 	_blob.rotation = Vector3(0.0, heading, lean)
 
 
-## Landing: a splash of metal thrown out from the feet and a puddle that ripples out and sinks
+## Landing: a splash of metal particles thrown up from the feet and fanned out along the floor
 func _land_splat() -> void:
 	_land_spray.restart()
-	_land_pool.global_position = global_position + Vector3.UP * 0.01
-	_land_pool.visible = true
-	_land_left = LAND_TIME
-
-
-func _update_land_splat(delta: float) -> void:
-	if _land_left <= 0.0:
-		return
-	_land_left = maxf(_land_left - delta, 0.0)
-	var t := 1.0 - _land_left / LAND_TIME
-	var r := lerpf(0.35, 1.4, 1.0 - pow(1.0 - t, 3.0)) # flung out fast, then slowing
-	_land_pool.scale = Vector3(r, 0.07 * (1.0 - t), r)
-	_land_material.set_shader_parameter("splash", 1.0 - t)
-	_land_pool.visible = _land_left > 0.0
+	_land_skid.restart()
 
 
 func _set_shape(size: Dictionary) -> void:
