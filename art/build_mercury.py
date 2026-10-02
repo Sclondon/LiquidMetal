@@ -2,13 +2,13 @@
 #   blender -b --factory-startup --python art/build_mercury.py
 # Writes art/mercury.blend (to open and tweak by hand) and models/mercury.glb (what Godot loads).
 #
-# Every body part is its own floating shard with its pivot at its joint: a sharp mask for a
-# head with one big spike growing out of it, raked back, chest, pelvis,
-# shoulder spikes, blade arms, and long two-piece legs (a big thigh blade, then a shin blade to
+# Every body part is its own floating shard with its pivot at its joint: a teardrop head (a
+# round bulb for the face, drawn up and back into one long raked point), a plain kite of a chest, thick
+# blade arms floating off the shoulders, and long two-piece legs (a big thigh blade, then a shin blade to
 # a point, with a guard rising above the knee). Faces +Y in Blender (= -Z in Godot).
 #
 # Animations (NLA tracks; each becomes one glTF animation across all the parts):
-#   run  - 20 frames at 30 fps, looping: a snappy skating stride (push out to the side, glide), body
+#   run  - 36 frames at 30 fps, looping: a long, snappy skating stride (push out to the side, glide), body
 #          banking over the gliding leg, leaning forward, arms trailing back ninja-run style
 #   jump - snaps from the push-off into a leap (knees tucked, arms swept back) and holds it
 
@@ -17,6 +17,7 @@ import os
 
 import bmesh
 import bpy
+from mathutils import Matrix
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -118,6 +119,22 @@ def add_spike(bm, base, tip, radius):
 
 # --- The figure --------------------------------------------------------------------------
 
+def add_lathe(bm, rings, top, bottom, sides=8):
+    """A faceted round shape along Z: rings of (z, radius), bottom to top, closed to points at
+    z = bottom and z = top."""
+    loops = []
+    for z, radius in rings:
+        loops.append([bm.verts.new((radius * math.cos(2 * math.pi * k / sides), radius * math.sin(2 * math.pi * k / sides), z)) for k in range(sides)])
+    for a, b in zip(loops, loops[1:]):
+        for k in range(sides):
+            n = (k + 1) % sides
+            bm.faces.new((a[k], a[n], b[n], b[k]))
+    for end, loop in ((bottom, loops[0]), (top, loops[-1])):
+        tip = bm.verts.new((0, 0, end))
+        for k in range(sides):
+            bm.faces.new((loop[k], loop[(k + 1) % sides], tip))
+
+
 def add_mask(bm, outline, rim, front, back):
     """A faceted mask: an outline in the XZ plane (at y = rim) fanned to a point in front
     (the ridge down the face) and one behind, so every edge is sharp."""
@@ -136,45 +153,31 @@ HIP_Z = THIGH + SHIN
 root = empty("Mercury", (0, 0, 0))
 hips = empty("hips", (0, 0, HIP_Z), root)
 
+# Chest: one plain kite, a point at the waist and a point at the neck
 bm = bmesh.new()
-add_shard(bm, [(0.0, 0.26, 0.17)], top=0.1, bottom=-0.15)
-pelvis = mesh_object("pelvis", bm, (0, 0, 0), hips)
-
-# Chest: a kite, a point at the waist, widest across the shoulders
-bm = bmesh.new()
-add_shard(bm, [(0.42, 0.52, 0.26), (0.5, 0.34, 0.18)], top=None, bottom=0.0)
+add_shard(bm, [(0.36, 0.5, 0.26)], top=0.54, bottom=0.0)
 chest = mesh_object("chest", bm, (0, 0, 0.17), hips)
 
-# Head: a sharp mask (pointed brow, cheekbones, a chin to a point) with a small skull behind
-# it, and one big spike growing out of the top of the mask, raked back
+# Head: a teardrop. A round (faceted) bulb for the face, drawn up and back into one long
+# point: the spike, raked back.
 bm = bmesh.new()
-mask_outline = [
-    (0.0, 0.25), (-0.09, 0.17), (-0.23, 0.23), (-0.19, 0.06), (-0.15, -0.04), (-0.06, -0.14), (0.0, -0.23),
-    (0.06, -0.14), (0.15, -0.04), (0.19, 0.06), (0.23, 0.23), (0.09, 0.17),
-]
-add_mask(bm, mask_outline, rim=0.03, front=(0, 0.13, 0.04), back=(0, -0.03, 0.04))
-add_shard(bm, [(0.04, 0.2, 0.17)], top=0.17, bottom=-0.1, offset=(0, -0.08, 0))
-add_spike(bm, (0, -0.01, 0.19), (0, -0.48, 0.86), 0.085)
+add_lathe(bm, [(-0.08, 0.13), (0.0, 0.17), (0.09, 0.16), (0.2, 0.11), (0.36, 0.06)], top=0.82, bottom=-0.15)
+bmesh.ops.rotate(bm, verts=bm.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-38), 3, "X"))
 head = mesh_object("head", bm, (0, 0, 0.7), chest)
 for s in (-1, 1):
     bm = bmesh.new()
     bmesh.ops.create_cube(bm, size=1.0)
     bmesh.ops.scale(bm, vec=(0.1, 0.02, 0.026), verts=bm.verts)
-    eye = mesh_object(f"eye_{'L' if s < 0 else 'R'}", bm, (s * 0.062, 0.085, 0.07), head, EYE)
-    eye.rotation_euler = (0, s * 0.45, -s * 0.5)  # slanted into a V, lying along the mask
+    eye = mesh_object(f"eye_{'L' if s < 0 else 'R'}", bm, (s * 0.07, 0.17, 0.03), head, EYE)
+    eye.rotation_euler = (0, s * 0.45, -s * 0.5)  # slanted into a V on the front of the bulb
 
-# Spikes off the back of the shoulders
-for s in (-1, 1):
-    bm = bmesh.new()
-    add_spike(bm, (0, 0, 0), (s * 0.24, -0.14, 0.34), 0.055)
-    mesh_object(f"shoulder_{'L' if s < 0 else 'R'}", bm, (s * 0.28, -0.04, 0.47), chest)
-
-# Arms: a long blade each, from just off the shoulder (posed swept back, ninja-run style)
+# Arms: a thick blade each, floating free a little way off the shoulder (posed trailing
+# back, ninja-run style, and bobbing on their own as he moves)
 arms = {}
 for s, tag in ((-1, "L"), (1, "R")):
     bm = bmesh.new()
-    add_shard(bm, [(-0.2, 0.17, 0.1), (-0.04, 0.07, 0.06)], top=None, bottom=-0.86)
-    arm = mesh_object(f"arm_{tag}", bm, (s * 0.34, 0, 0.44), chest)
+    add_shard(bm, [(-0.22, 0.28, 0.18), (-0.04, 0.13, 0.11)], top=None, bottom=-0.8)
+    arm = mesh_object(f"arm_{tag}", bm, (s * 0.46, 0, 0.42), chest)
     arms[tag] = (arm, s)
 
 # Legs: a big thigh blade, a gap for the knee, then a shin blade to a point. A guard on the
@@ -197,7 +200,7 @@ for obj in scene.objects:
 
 REST = {obj.name: (obj.location.copy(), obj.rotation_euler.copy()) for obj in scene.objects}
 deg = math.radians
-RUN_FRAMES = 20  # one push with each leg
+RUN_FRAMES = 36  # one long push with each leg
 
 
 def key(obj, frame, rx=None, ry=None, rz=None, x=None, z=None):
@@ -220,11 +223,11 @@ def key(obj, frame, rx=None, ry=None, rz=None, x=None, z=None):
     obj.keyframe_insert("rotation_euler", frame=frame)
 
 
-def ninja_arms(frame, sway=0.0, rx=-28):
+def ninja_arms(frame, sway=0.0, rx=-28, bob=0.0):
     # Trailing back and a little out, like a ninja run (the chest's lean takes them further
-    # back, so this is on top of that)
+    # back, so this is on top of that); bob lifts them, floating
     for tag, (arm, s) in arms.items():
-        key(arm, frame, rx=rx + sway * s, ry=s * 14)
+        key(arm, frame, rx=rx + sway * s, ry=s * 14, z=bob)
 
 
 def run_keys():
@@ -233,10 +236,10 @@ def run_keys():
     # (swing forward, out to the side, knee bend) every 6 frames for the left leg; the right is
     # half a cycle behind, mirrored.
     stride = [
-        (14, 0, -38),  # frame 0: gliding under the body
-        (-14, 24, -20),  # 6: pushing out and back
-        (-34, 38, -2),  # 12: push snapped straight
-        (-6, 12, -80),  # 18: lifted, knee folded, swinging back in
+        (28, 0, -50),  # gliding under the body, reaching forward
+        (-26, 40, -22),  # pushing out and back
+        (-60, 58, 0),  # push snapped straight, far out behind
+        (6, 24, -118),  # lifted high, knee folded, swinging back in
     ]
     step = RUN_FRAMES // len(stride)
     for tag, side, shift in (("L", -1, 0), ("R", 1, len(stride) // 2)):
@@ -248,13 +251,16 @@ def run_keys():
     # The body rides over whichever leg is gliding: shifts and banks onto it, dips as the push
     # starts, rises as it snaps straight. The upper body leans well forward throughout (the
     # chest leans, not the hips, so the legs stay under it).
-    for frame24, shift_x, bank, bob in ((0, -0.1, -9, 0.0), (6, -0.05, -5, -0.06), (10, 0.02, 2, 0.03),
-                                      (12, 0.1, 9, 0.0), (18, 0.05, 5, -0.06), (22, -0.02, -2, 0.03), (24, -0.1, -9, 0.0)):
+    for frame24, shift_x, bank, bob in ((0, -0.18, -16, 0.0), (6, -0.09, -9, -0.13), (10, 0.04, 4, 0.06),
+                                      (12, 0.18, 16, 0.0), (18, 0.09, 9, -0.13), (22, -0.04, -4, 0.06), (24, -0.18, -16, 0.0)):
         frame = round(frame24 * RUN_FRAMES / 24)  # laid out on a 24-frame cycle
         key(hips, frame, ry=bank, x=shift_x, z=bob - 0.08)
         key(chest, frame, rx=-32, rz=-bank * 1.2)
         key(head, frame, rx=36, ry=-bank * 0.6)  # head up against the lean, eyes on the track
-        ninja_arms(frame, sway=bank * 0.6)
+    # The arms float on their own: bobbing once per push, a beat behind the body, swaying a little
+    for frame in range(0, RUN_FRAMES + 1, 3):
+        phase = 2 * math.pi * frame / RUN_FRAMES
+        ninja_arms(frame, sway=-16 * math.cos(phase) * 0.6, rx=-28 + 7 * math.sin(phase * 2 + 0.6), bob=0.07 * math.sin(phase * 2 - 1.2))
 
 
 def jump_keys():
@@ -282,7 +288,7 @@ def jump_keys():
 
 
 def bake(track_name, keyer, interpolation):
-    animated = [o for o in scene.objects if o.type == "MESH" and not o.name.startswith(("eye_", "shoulder_", "pelvis"))]
+    animated = [o for o in scene.objects if o.type == "MESH" and not o.name.startswith("eye_")]
     animated.append(hips)
     for obj in animated:
         obj.animation_data_create()
@@ -292,7 +298,8 @@ def bake(track_name, keyer, interpolation):
         action = obj.animation_data.action
         for curve in action.fcurves:
             for point in curve.keyframe_points:
-                point.interpolation = interpolation
+                # The arms' bob is keyed densely along a wave: smooth between those keys
+                point.interpolation = "SINE" if obj.name.startswith("arm_") and track_name == "run" else interpolation
                 point.easing = "EASE_IN_OUT"
         track = obj.animation_data.nla_tracks.new()
         track.name = track_name

@@ -5,7 +5,7 @@ extends Node3D
 ## a held pose). Faces -Z.
 
 const MODEL_SCALE := 0.66 # the .glb is ~3.1 m to the horn tip; this makes it ~2 m
-const RUN_PACE := 12.0 # run speed (m/s) at which the stride plays at its authored rate
+const RUN_PACE := 14.0 # run speed (m/s) at which the stride plays at its authored rate (1.2 s a cycle)
 const BLEND := 0.08 # seconds to blend between run and jump: snappy
 
 var material: Material

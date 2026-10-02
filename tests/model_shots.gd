@@ -8,14 +8,14 @@ var t := 0.0
 var taken := {}
 # [time, name, camera offset from the player (in its facing frame: x right, z ahead)]
 var shots := [
-	[1.2, "front", Vector3(0.6, 1.3, 3.2)],
-	[1.6, "three_quarter", Vector3(2.4, 1.4, 2.4)],
-	[1.8, "side_1", Vector3(3.3, 1.1, 0.0)],
-	[1.9, "side_2", Vector3(3.3, 1.1, 0.0)],
+	[1.1, "front", Vector3(0.6, 1.3, 3.2)],
+	[1.4, "three_quarter", Vector3(2.4, 1.4, 2.4)],
+	[1.6, "side_1", Vector3(3.3, 1.1, 0.0)],
+	[1.8, "side_2", Vector3(3.3, 1.1, 0.0)],
 	[2.0, "side_3", Vector3(3.3, 1.1, 0.0)],
-	[2.1, "side_4", Vector3(3.3, 1.1, 0.0)],
-	[2.2, "side_5", Vector3(3.3, 1.1, 0.0)],
-	[2.3, "back", Vector3(-1.0, 1.8, -3.5)],
+	[2.2, "side_4", Vector3(3.3, 1.1, 0.0)],
+	[2.4, "side_5", Vector3(3.3, 1.1, 0.0)],
+	[2.5, "back", Vector3(-1.0, 1.8, -3.5)],
 	[2.6, "jump", Vector3(3.3, 1.8, 0.5)],
 	[3.25, "duck", Vector3(2.8, 1.3, 1.0)],
 ]
