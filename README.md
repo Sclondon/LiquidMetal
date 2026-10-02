@@ -5,10 +5,10 @@ A 3D auto runner for the Scareathon arcade: you are Mercury, a figure of liquid 
 | Do | Touch / mouse | Keys |
 | --- | --- | --- |
 | Turn | tap and hold the left / right half of the screen | A / D (held) |
-| Jump | swipe up | Space, W, Up |
+| Jump (a front flip) | swipe up | Space, W, Up |
 | Duck (melt into a puddle) | swipe down (in the air: dive, then puddle) | S, Down |
-| Dodge (sidestep 3 m) | swipe left / right | Left / Right arrows |
-| Dash (burst of speed, then a cooldown) | DASH button, bottom right | Shift, E |
+| Dodge (sidestep 4.5 m, with a barrel roll) | swipe left / right | Left / Right arrows |
+| Dash (burst of speed and a twirl, then a cooldown) | DASH button, bottom right | Shift, E |
 | New course, back to the start | TUNE → New course | R |
 
 Hitting something head-on splats you; you pull back together about a second back along your path.
@@ -34,6 +34,7 @@ exports `models/mercury.glb`:
 
 If you edit the .blend by hand instead, export glTF (.glb) to `models/mercury.glb` with Animation mode "NLA Tracks".
 - `runner_input.gd` – swipe / hold / keyboard → signals and a turn axis.
+- `trail.gd` – the trail of little puddles left behind; splashes at the feet are a CPUParticles3D in player.gd.
 - `droplets.gd` – little blobs that flop off Mercury as it moves and get pulled back in.
 - `follow_cam.gd`, `hud.gd` (DASH button; TUNE panel: speed, turn rate, jump height, camera, N64 filter).
 - `shaders/n64.gdshader` – the N64 look: ~400-line picture (kept light), soft bilinear upscale, 16-bit colour with dither.

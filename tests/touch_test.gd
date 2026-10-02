@@ -86,7 +86,7 @@ func _process(delta: float) -> bool:
 			wait = 0.3
 		8:
 			var moved: float = player.global_position.dot(player.right()) - x0
-			_check("swipe left dodges left about 3 m (moved %.2f)" % moved, moved < -2.5 and moved > -3.5)
+			_check("swipe left dodges left about 4.5 m (moved %.2f)" % moved, moved < -4.0 and moved > -5.0)
 			_check("a swipe doesn't turn", absf(player.heading - heading0) < 0.01)
 			for line in log:
 				print(line)

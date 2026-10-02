@@ -9,8 +9,8 @@ signal drops_changed(total: int)
 
 const GRAVITY := 42.0
 const FAST_FALL := 2.6 # gravity multiplier when you swipe down in the air
-const DODGE_DIST := 3.0
-const DODGE_TIME := 0.16
+const DODGE_DIST := 4.5
+const DODGE_TIME := 0.2
 const DUCK_TIME := 0.75
 const SLIDE_LEAD := 0.2 # seconds in the slide pose before melting into the puddle
 const STAND := { radius = 0.5, height = 1.3 }
@@ -57,6 +57,15 @@ var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
 var _figure_material := ShaderMaterial.new()
 var _droplets := preload("res://scripts/droplets.gd").new()
+var _trail := preload("res://scripts/trail.gd").new()
+var _feet := CPUParticles3D.new() # metal splashing up at its feet as it runs
+var _trail_clock := 0.0
+var _trail_side := 1.0
+# A flip or twirl in progress: the axis (in Mercury's own frame), the turn, how long, how far in
+var _spin_axis := Vector3.RIGHT
+var _spin_turn := 0.0
+var _spin_time := 1.0
+var _spin_left := 0.0
 var _melt := 0.0 # 0 = Mercury standing, 1 = a puddle (ducking, or pulling back together)
 var _splash := CPUParticles3D.new()
 
@@ -116,6 +125,32 @@ func _ready() -> void:
 	_droplets.parts = _figure.parts()
 	_droplets.rejoined.connect(func(part): _figure.ripple(part, 0.7))
 
+	_trail.material = _figure_material
+	add_child(_trail)
+
+	var splash := SphereMesh.new()
+	splash.radius = 0.05
+	splash.height = 0.1
+	splash.radial_segments = 6
+	splash.rings = 3
+	splash.material = _figure_material
+	_feet.mesh = splash
+	_feet.amount = 40
+	_feet.lifetime = 0.45
+	_feet.local_coords = false
+	_feet.emitting = false
+	_feet.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	_feet.emission_box_extents = Vector3(0.25, 0.02, 0.25)
+	_feet.direction = Vector3(0, 1, 0.6) # up and back (Mercury runs toward -Z)
+	_feet.spread = 35.0
+	_feet.initial_velocity_min = 2.0
+	_feet.initial_velocity_max = 4.5
+	_feet.gravity = Vector3(0, -GRAVITY * 0.7, 0)
+	_feet.scale_amount_min = 0.5
+	_feet.scale_amount_max = 1.4
+	_feet.position.y = 0.05
+	add_child(_feet)
+
 	input.jump.connect(_on_jump)
 	input.duck.connect(_on_duck)
 	input.dodge.connect(_on_dodge)
@@ -160,6 +195,7 @@ func _on_jump() -> void:
 		_agitation = 1.0
 		_liquid_hold = 0.2
 		_droplets.burst(3)
+		_spin(Vector3.RIGHT, -TAU, 0.6) # a front flip
 
 
 func _on_duck() -> void:
@@ -177,9 +213,17 @@ func _on_dodge(direction: float) -> void:
 		return
 	_dodge_dir = direction
 	_dodge_left = DODGE_TIME
+	_spin(Vector3.BACK, -direction * TAU, 0.32) # a barrel roll the way it's going
 	_agitation = 1.0
 	_liquid_hold = 0.3
 	_droplets.burst(3, 0.8)
+
+
+func _spin(axis: Vector3, turn: float, time: float) -> void:
+	_spin_axis = axis
+	_spin_turn = turn
+	_spin_time = time
+	_spin_left = time
 
 
 func is_dashing() -> bool:
@@ -194,6 +238,7 @@ func _on_dash() -> void:
 	dash_cooldown = DASH_COOLDOWN
 	_agitation = 1.0
 	_liquid_hold = DASH_TIME + 0.1
+	_spin(Vector3.UP, TAU, DASH_TIME) # a twirl
 	_droplets.burst(6, 1.3)
 	dashed.emit()
 
@@ -281,11 +326,17 @@ func _process(delta: float) -> void:
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
 	if is_dashing():
 		stretch *= Vector3(0.88, 0.92, 1.35) # drawn out along the dash
-	_figure.scale = stretch.lerp(Vector3(1.6, 0.06, 1.6), melt)
 	_figure.visible = melt < 0.97
-	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself)
+	# Faces the way it's going, leaning into sidesteps (the model leans into turns itself), and
+	# flipping or twirling about its middle during a move
 	var lean := -(_dodge_dir * 0.35 if _dodge_left > 0.0 else 0.0)
-	_figure.rotation = Vector3(0.0, heading, lean)
+	var spin := Basis.IDENTITY
+	if _spin_left > 0.0:
+		_spin_left = maxf(_spin_left - delta, 0.0)
+		spin = Basis(_spin_axis, _spin_turn * smoothstep(0.0, 1.0, 1.0 - _spin_left / _spin_time))
+	var turn := Basis(Vector3.UP, heading) * spin * Basis(Vector3.BACK, lean)
+	var middle := Vector3.UP * 0.9
+	_figure.transform = Transform3D(turn * Basis.from_scale(stretch.lerp(Vector3(1.6, 0.06, 1.6), melt)), middle - turn * middle)
 	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
@@ -297,6 +348,17 @@ func _process(delta: float) -> void:
 	if _drip_clock <= 0.0 and is_on_floor() and melt < 0.1:
 		_drip_clock = randf_range(0.15, 0.45)
 		_droplets.burst(randi_range(1, 2), 0.7)
+
+	# Splashing at its feet and a trail of puddles while it runs on the ground
+	var running := is_on_floor() and melt < 0.5 and not dead
+	_feet.emitting = running
+	_feet.rotation.y = heading
+	_trail_clock -= delta
+	if is_on_floor() and _trail_clock <= 0.0:
+		_trail_clock = 0.07
+		_trail_side = -_trail_side
+		var size := 0.45 if melt > 0.5 else 0.28 # the puddle leaves a wider smear
+		_trail.drop(global_position + right() * _trail_side * 0.15 * (1.0 - melt), heading, size)
 
 	# The puddle swells as Mercury sinks into it
 	_blob.visible = melt > 0.03
@@ -339,6 +401,8 @@ func _splat() -> void:
 	_figure.visible = false
 	_splash.restart()
 	_droplets.clear()
+	_feet.emitting = false
+	_spin_left = 0.0
 	splatted.emit()
 	var back := clampi(_history.size() - int(REWIND / 0.1), 0, _history.size())
 	var spot: Vector3 = _spawn.origin
