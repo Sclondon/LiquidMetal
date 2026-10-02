@@ -171,6 +171,14 @@ func ripple_all(amount := 1.0) -> void:
 		_splash[i] = maxf(_splash[i], amount)
 
 
+## Set a liquid-metal shader setting on every part, ball and the base material
+func set_shader(setting: String, value: Variant) -> void:
+	material.set_shader_parameter(setting, value)
+	_ball_material.set_shader_parameter(setting, value)
+	for own in _part_materials:
+		own.set_shader_parameter(setting, value)
+
+
 ## How far into the slide's melt it is: 0 standing, 1 every part a puddle on the floor
 func set_puddle(amount: float) -> void:
 	_puddle = amount

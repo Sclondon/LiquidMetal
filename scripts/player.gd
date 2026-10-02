@@ -12,7 +12,32 @@ const FAST_FALL := 2.6 # gravity multiplier when you swipe down in the air
 const DODGE_DIST := 4.5
 const DODGE_TIME := 0.2
 const DUCK_TIME := 0.75
-const SLIDE_LEAD := 0.2 # seconds in the slide pose before melting into the puddle
+const SLIDE_LEAD := 0.28 # seconds in the slide pose (hop included) before melting into the puddle
+const HOP_TIME := 0.24 # the hop into a slide (just the figure: the collider stays low)
+const HOP_HEIGHT := 0.45
+# The acrobatics for each move, one picked at random each time (never the same twice running):
+# [axis in Mercury's frame, turns (negative: the other way; a dodge's direction flips it)]
+const TRICKS := {
+	jump = [
+		[Vector3.RIGHT, -1.0], # front flip
+		[Vector3.RIGHT, 1.0], # back flip
+		[Vector3.RIGHT, -2.0], # double front flip
+		[Vector3.BACK, 1.0], # side flip
+		[Vector3(0.0, 0.8, 0.6), 1.5], # corkscrew
+	],
+	dash = [
+		[Vector3.UP, 1.0], # twirl
+		[Vector3.UP, 2.0], # double twirl
+		[Vector3.UP, -1.0], # reverse twirl
+		[Vector3.BACK, 1.0], # drill roll
+	],
+	dodge = [
+		[Vector3.BACK, -1.0], # barrel roll, toward the dodge
+		[Vector3.BACK, -2.0], # double barrel roll
+		[Vector3(0.0, 0.45, 0.9), -1.0], # cartwheel
+		[Vector3.UP, -1.0], # spin
+	],
+}
 const STAND := { radius = 0.5, height = 1.3 }
 const PUDDLE := { radius = 0.3, height = 0.6 }
 const BLOB_RADIUS := 0.55
@@ -58,6 +83,11 @@ var _material := ShaderMaterial.new()
 var _figure := preload("res://scripts/mercury_model.gd").new()
 var _figure_material := ShaderMaterial.new()
 var _droplets := preload("res://scripts/droplets.gd").new()
+# True reflections: a probe riding along with Mercury, re-capturing the scene every frame
+# (Mercury itself is on its own render layer, which the probe leaves out)
+const OWN_LAYER := 2
+var _probe := ReflectionProbe.new()
+var real_reflections := can_reflect()
 var _trail := preload("res://scripts/trail.gd").new()
 var _feet := CPUParticles3D.new() # metal splashing up at its feet as it runs
 # A flip or twirl in progress: the axis (in Mercury's own frame), the turn, how long, how far in
@@ -65,6 +95,8 @@ var _spin_axis := Vector3.RIGHT
 var _spin_turn := 0.0
 var _spin_time := 1.0
 var _spin_left := 0.0
+var _last_trick := {}
+var _hop_left := 0.0
 var _melt := 0.0 # 0 = Mercury standing, 1 = a puddle (ducking, or pulling back together)
 var _splash := CPUParticles3D.new()
 
@@ -153,10 +185,44 @@ func _ready() -> void:
 	_feet.position.y = 0.05
 	add_child(_feet)
 
+	_probe.size = Vector3(90.0, 30.0, 90.0)
+	_probe.position = Vector3(0.0, 1.2, 0.0)
+	_probe.update_mode = ReflectionProbe.UPDATE_ALWAYS
+	_probe.max_distance = 140.0
+	_probe.cull_mask = 0xFFFFF & ~(1 << (OWN_LAYER - 1))
+	_probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED
+	add_child(_probe)
+	_own_layer(self)
+	set_real_reflections(real_reflections)
+
 	input.jump.connect(_on_jump)
 	input.duck.connect(_on_duck)
 	input.dodge.connect(_on_dodge)
 	input.dash.connect(_on_dash)
+
+
+## Live reflection probes need the Forward+ / Mobile renderers: the web build (Compatibility)
+## can't, and keeps the painted horizon
+static func can_reflect() -> bool:
+	return RenderingServer.get_current_rendering_method() != "gl_compatibility"
+
+
+## Mirror the real scene (a reflection probe) or just the painted horizon (cheaper)
+func set_real_reflections(on: bool) -> void:
+	on = on and can_reflect()
+	real_reflections = on
+	_probe.visible = on
+	var amount := 1.0 if on else 0.0
+	_figure.set_shader("real_reflection", amount)
+	_material.set_shader_parameter("real_reflection", amount)
+
+
+## Mercury and everything it's made of on its own render layer (the probe doesn't see it)
+func _own_layer(node: Node) -> void:
+	if node is VisualInstance3D and node != _probe:
+		node.layers = 1 << (OWN_LAYER - 1)
+	for child in node.get_children():
+		_own_layer(child)
 
 
 func forward() -> Vector3:
@@ -197,7 +263,7 @@ func _on_jump() -> void:
 		_agitation = 1.0
 		_liquid_hold = 0.2
 		_droplets.burst(3)
-		_spin(Vector3.RIGHT, -TAU, 0.6) # a front flip
+		_trick("jump", 1.0, 0.6)
 
 
 func _on_duck() -> void:
@@ -205,6 +271,8 @@ func _on_duck() -> void:
 		return
 	_duck_left = DUCK_TIME
 	if is_on_floor():
+		if not ducking:
+			_hop_left = HOP_TIME # a little hop up into the slide
 		_set_ducking(true)
 	else:
 		_fast_fall = true # dive down, then puddle on landing
@@ -215,10 +283,21 @@ func _on_dodge(direction: float) -> void:
 		return
 	_dodge_dir = direction
 	_dodge_left = DODGE_TIME
-	_spin(Vector3.BACK, -direction * TAU, 0.32) # a barrel roll the way it's going
+	_trick("dodge", direction, 0.34)
 	_agitation = 1.0
 	_liquid_hold = 0.3
 	_droplets.burst(3, 0.8)
+
+
+## Pick one of the move's acrobatics (side: a dodge's direction) and start it
+func _trick(move: String, side: float, time: float) -> void:
+	var options: Array = TRICKS[move]
+	var pick := randi() % options.size()
+	if options.size() > 1 and pick == _last_trick.get(move, -1):
+		pick = (pick + 1 + randi() % (options.size() - 1)) % options.size()
+	_last_trick[move] = pick
+	var trick: Array = options[pick]
+	_spin((trick[0] as Vector3).normalized(), trick[1] * side * TAU, time)
 
 
 func _spin(axis: Vector3, turn: float, time: float) -> void:
@@ -240,7 +319,7 @@ func _on_dash() -> void:
 	dash_cooldown = DASH_COOLDOWN
 	_agitation = 1.0
 	_liquid_hold = DASH_TIME + 0.1
-	_spin(Vector3.UP, TAU, DASH_TIME) # a twirl
+	_trick("dash", 1.0, DASH_TIME + 0.05)
 	_droplets.burst(6, 1.3)
 	dashed.emit()
 
@@ -339,7 +418,11 @@ func _process(delta: float) -> void:
 		spin = Basis(_spin_axis, _spin_turn * smoothstep(0.0, 1.0, 1.0 - _spin_left / _spin_time))
 	var turn := Basis(Vector3.UP, heading) * spin * Basis(Vector3.BACK, lean)
 	var middle := Vector3.UP * 0.9
-	_figure.transform = Transform3D(turn * Basis.from_scale(stretch.lerp(Vector3.ONE, melt)), middle - turn * middle)
+	var hop := 0.0
+	if _hop_left > 0.0:
+		_hop_left = maxf(_hop_left - delta, 0.0)
+		hop = sin(PI * (1.0 - _hop_left / HOP_TIME)) * HOP_HEIGHT
+	_figure.transform = Transform3D(turn * Basis.from_scale(stretch.lerp(Vector3.ONE, melt)), middle - turn * middle + Vector3.UP * hop)
 	_figure.set_puddle(_melt) # the parts melt into puddles one by one
 	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), not is_on_floor(), velocity.y, steer, ducking)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after

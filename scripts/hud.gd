@@ -76,6 +76,12 @@ func _build_panel(root: Control) -> void:
 	back.text = "New course"
 	back.pressed.connect(func(): restart.call())
 	rows.add_child(back)
+	var mirror := CheckButton.new()
+	mirror.text = "Real reflections"
+	mirror.button_pressed = player.real_reflections
+	mirror.toggled.connect(func(on): player.set_real_reflections(on))
+	if player.can_reflect(): # not on the web build: it can't
+		rows.add_child(mirror)
 	var retro := CheckButton.new()
 	retro.text = "N64 filter"
 	retro.button_pressed = n64.visible

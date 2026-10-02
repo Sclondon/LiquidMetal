@@ -5,6 +5,8 @@ shader_type spatial;
 // on every renderer, web included, not only where the sky's reflections are good.
 
 uniform float agitation : hint_range(0.0, 1.0) = 0.0;
+// 1: a true mirror of the scene around it (from a reflection probe); 0: the painted horizon only
+uniform float real_reflection : hint_range(0.0, 1.0) = 0.0;
 uniform float ripple = 1.0; // how much the surface moves (less on the faceted figure)
 // Melting a shape into a ball: at 1 every vertex has swelled or shrunk onto a sphere of
 // ball_radius around collapse_center (Mercury's parts do this as they turn liquid)
@@ -50,8 +52,8 @@ void fragment() {
 	env = mix(env, mix(ground, grid_glow * 0.5, smoothstep(-0.25, 0.0, up)), step(up, 0.0));
 	env += vec3(1.0) * smoothstep(0.012, 0.0, abs(up - 0.02)) * 0.8; // the bright horizon line
 	float fresnel = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 2.0);
-	ALBEDO = vec3(0.25);
+	ALBEDO = vec3(mix(0.25, 0.95, real_reflection));
 	METALLIC = 1.0;
-	ROUGHNESS = 0.12;
-	EMISSION = env * (0.65 + fresnel * 0.6);
+	ROUGHNESS = mix(0.12, 0.03, real_reflection);
+	EMISSION = env * (0.65 + fresnel * 0.6) * (1.0 - real_reflection * 0.85);
 }
