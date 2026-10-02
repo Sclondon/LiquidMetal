@@ -124,6 +124,10 @@ var _look_clock := 0.0
 var _bounce_t := 9.0
 var _dash_kick := 0.0
 var _punch := 0.0
+var _charging := false # the dash held down: winding up the punch
+var _charge := 0.0 # 0 .. 1 how wound up
+var _dash_power := 1.0
+const CHARGE_TIME := 0.9 # seconds to wind up fully
 var _last_velocity := Vector3.ZERO
 # A crash: blobs of him flung on with his momentum, splatting where they hit
 var _crash_balls: Array[Dictionary] = [] # { view, velocity, radius }
@@ -480,6 +484,14 @@ func boost() -> void:
 	boosted.emit()
 
 
+## The punch thrown: launched, harder and further the longer it was wound up
+func _launch_punch() -> void:
+	_dash_power = 1.0 + _charge * 1.2
+	_dash_left = DASH_TIME * (1.0 + _charge)
+	_droplets.burst(5 + int(_charge * 6.0), 1.3 + _charge)
+	_charge = 0.0
+
+
 func is_dashing() -> bool:
 	return _dash_left > 0.0
 
@@ -520,7 +532,7 @@ func _physics_process(delta: float) -> void:
 	speed = move_toward(speed, run_speed, ACCELERATION * delta) # (a slide keeps its speed)
 	var going := speed
 	if _dash_left > 0.0:
-		going *= DASH_BOOST
+		going *= DASH_BOOST * _dash_power
 		_dash_left -= delta
 	var ground := forward() * going + right() * sideways
 	if wall_running:
@@ -537,7 +549,7 @@ func _physics_process(delta: float) -> void:
 		var hit := get_slide_collision(i)
 		var normal := hit.get_normal()
 		if normal.y < 0.5 and normal.dot(forward()) < -0.6:
-			_splat(hit.get_position(), normal)
+			_splat(hit.get_position(), normal, hit.get_collider())
 			return
 		if absf(normal.y) < 0.3 and absf(normal.dot(forward())) < 0.5:
 			side_wall = Vector3(normal.x, 0.0, normal.z).normalized()
@@ -599,7 +611,7 @@ func _physics_process(delta: float) -> void:
 	if ducking:
 		_duck_left -= delta
 		var held: bool = input.duck_held()
-		if (_duck_left <= 0.0 and not held) or absf(input.turn) > 0.5:
+		if (_duck_left <= 0.0 and not held) or (absf(input.turn) > 0.5 and _sink < 0.5):
 			_set_ducking(false) # (turning: up out of it, back to skating)
 			if not ducking:
 				_duck_left = 0.0
@@ -709,12 +721,20 @@ func _process(delta: float) -> void:
 	if _dash_kick > 0.0:
 		_dash_kick -= delta
 		if _dash_kick <= 0.0:
-			# The punch: launched
-			_dash_left = DASH_TIME
-			_droplets.burst(5, 1.3)
+			_dash_kick = 0.0
+			if input.dash_held():
+				_charging = true # held: winding up
+			else:
+				_launch_punch()
+	elif _charging:
+		_charge = minf(_charge + delta / CHARGE_TIME, 1.0)
+		_agitation = maxf(_agitation, _charge)
+		if not input.dash_held() or dead:
+			_charging = false
+			_launch_punch()
 	# The right arm: cocked back through the steps, punched out (and stretched) through the dash,
 	# then springing back
-	var cock := 1.0 - _dash_kick / DASH_KICK if _dash_kick > 0.0 else 0.0
+	var cock := 1.0 - _dash_kick / DASH_KICK if _dash_kick > 0.0 else (1.0 + _charge * 0.5 if _charging else 0.0)
 	_punch = move_toward(_punch, 1.0 if is_dashing() else 0.0, delta * (14.0 if is_dashing() else 4.0))
 	_figure.set_punch(cock, _punch)
 	var liquid := (not is_on_floor() and not wall_running) or _liquid_hold > 0.0
@@ -927,12 +947,24 @@ func _look_around(delta: float) -> void:
 ## A crash: every part of him (and a few more besides) flies on as a blob of liquid with the
 ## speed he had, and splats on whatever it hits: the wall's splats melt together on it, and any
 ## that drop to the floor join the floor's puddles
-func _crash_burst(point: Vector3, normal: Vector3) -> void:
+func _crash_burst(point: Vector3, normal: Vector3, collider: Object = null) -> void:
 	var flat := Vector3(normal.x, 0.0, normal.z).normalized()
 	var across := flat.cross(Vector3.UP).normalized()
 	_wall_surface.global_transform = Transform3D(Basis(across, flat, across.cross(flat)), point + flat * 0.01)
 	_wall_surface.visible = true
 	_wall_splats.clear()
+	# Kept within the face of what was hit (no overhang off the top or ends of a fence)
+	var clip := Vector4(-1e4, -1e4, 1e4, 1e4)
+	if collider is Node3D and collider.get_child_count() > 0 and collider.get_child(0) is CollisionShape3D and (collider.get_child(0) as CollisionShape3D).shape is BoxShape3D:
+		var shape: CollisionShape3D = collider.get_child(0)
+		var half: Vector3 = (shape.shape as BoxShape3D).size * 0.5
+		var inverse := _wall_surface.global_transform.affine_inverse()
+		clip = Vector4(1e4, 1e4, -1e4, -1e4)
+		for corner in 8:
+			var c := Vector3(half.x * (1 if corner & 1 else -1), half.y * (1 if corner & 2 else -1), half.z * (1 if corner & 4 else -1))
+			var at := inverse * (shape.global_transform * c)
+			clip = Vector4(minf(clip.x, at.x), minf(clip.y, at.z), maxf(clip.z, at.x), maxf(clip.w, at.z))
+	_wall_surface_material.set_shader_parameter("clip", clip)
 	_blob.visible = false
 	var starts: Array[Vector3] = []
 	for part in _figure.parts():
@@ -979,14 +1011,35 @@ func _update_crash(delta: float) -> void:
 		var n: Vector3 = hit.normal
 		var r: float = ball.radius * randf_range(2.2, 3.2)
 		if absf(n.y) < 0.6:
-			_wall_splats.append({ pos = hit.position, radius = r, grow = 0.0, drip = randf_range(0.05, 0.35) })
+			# Shrunk until it fits on what it hit (no overhang off a fence's edge)
+			var flat := Vector3(n.x, 0.0, n.z).normalized()
+			var side := flat.cross(Vector3.UP).normalized()
+			while r > 0.08 and not _fits(hit.position, r, flat, side):
+				r *= 0.8
+			if _fits(hit.position, r, flat, side):
+				_wall_splats.append({ pos = hit.position, radius = r, grow = 0.0, drip = randf_range(0.05, 0.35), normal = flat, side = side })
 		else:
 			_dab(hit.position, -1, 0.0, r * 1.8, Vector3.UP, 2.5)
 		view.queue_free()
 		_crash_balls.remove_at(i)
 	for splat in _wall_splats:
 		splat.grow = minf(splat.grow + delta * 6.0, 1.0)
-		splat.pos += Vector3.DOWN * splat.drip * delta # sliding slowly down the wall
+		# Sliding slowly down the wall, but not off the bottom of it
+		var lower: Vector3 = splat.pos + Vector3.DOWN * splat.drip * delta
+		if _fits(lower, splat.radius, splat.normal, splat.side):
+			splat.pos = lower
+
+
+## Whether a disc of radius r at a spot lies wholly on the surface behind it (rays in at its edges)
+func _fits(at: Vector3, r: float, normal: Vector3, side: Vector3) -> bool:
+	var space := get_world_3d().direct_space_state
+	for edge in [side * r, -side * r, Vector3.UP * r, Vector3.DOWN * r]:
+		var spot: Vector3 = at + edge * 0.95
+		var ray := PhysicsRayQueryParameters3D.create(spot + normal * 0.3, spot - normal * 0.3)
+		ray.exclude = [get_rid()]
+		if space.intersect_ray(ray).is_empty():
+			return false
+	return true
 
 
 ## The crash's liquid surface on the wall: every blob that hit it, melted together
@@ -1154,7 +1207,7 @@ func _room_to_stand() -> bool:
 
 ## Hit something: flattened into a puddle up against it (point, normal: where and which way it
 ## faces), that slides slowly down it; without one (fallen off the world), a splash
-func _splat(point := Vector3.INF, normal := Vector3.ZERO) -> void:
+func _splat(point := Vector3.INF, normal := Vector3.ZERO, collider: Object = null) -> void:
 	dead = true
 	velocity = Vector3.ZERO
 	_figure.visible = false
@@ -1162,7 +1215,7 @@ func _splat(point := Vector3.INF, normal := Vector3.ZERO) -> void:
 		_blob.visible = false
 		_splash.restart()
 	else:
-		_crash_burst(point, normal)
+		_crash_burst(point, normal, collider)
 	_droplets.clear()
 	_trail.lift() # break the tracks where it splatted
 	for spray in _foot_splash:
@@ -1296,6 +1349,9 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	dead = false
 	# Pulls itself back together out of a puddle
 	_melt = 1.0
+	_charging = false
+	_charge = 0.0
+	_dash_kick = 0.0
 	wall_running = false
 	_wall_roll = 0.0
 	_puddled = true

@@ -99,6 +99,21 @@ func _try_swipe(touch: Dictionary, pos: Vector2) -> void:
 
 
 ## Duck held down: S / Down, B / D-pad down, or a finger left down after swiping down
+## The DASH button held down on screen (the HUD sets it)
+var dash_button_down := false
+
+
+## Dash held down (charging the punch): Shift / E, X / Y, or the DASH button
+func dash_held() -> bool:
+	if dash_button_down or Input.is_physical_key_pressed(KEY_SHIFT) or Input.is_physical_key_pressed(KEY_E):
+		return true
+	if use_pads:
+		for pad in Input.get_connected_joypads():
+			if Input.is_joy_button_pressed(pad, JOY_BUTTON_X) or Input.is_joy_button_pressed(pad, JOY_BUTTON_Y):
+				return true
+	return false
+
+
 func duck_held() -> bool:
 	if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
 		return true

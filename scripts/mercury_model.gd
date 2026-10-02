@@ -360,7 +360,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		if _kick_left > 0.0:
 			_kick_left -= _delta
 			rate = _kick_rate if _kick_left > 0.04 else 0.0
-		if _punch > 0.3:
+		if _punch > 0.3 or (_cock >= 1.0 and _kick_left <= 0.0):
 			rate = 0.0 # held in the lunge while the punch carries him
 		_anim.speed_scale = rate
 	else:
@@ -397,7 +397,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 		var turn := Vector3(swing * 1.0 * _arm_pump * (1.0 - turn_support) + 0.5 * absf(out), 0.0, out)
 		if side == "R" and (_cock > 0.0 or _punch > 0.0):
 			# Cocked right back and up, then thrown straight out ahead
-			var cocked := Vector3(-1.6, 0.0, 0.35)
+			var cocked := Vector3(-1.6 - (_cock - 1.0) * 0.9, 0.0, 0.35 + (_cock - 1.0) * 0.4) # (wound further)
 			var thrown := Vector3(2.55, 0.0, -0.2) # (past 90 degrees: his chest leans forward)
 			turn = turn.lerp(cocked, _cock).lerp(thrown, _punch)
 		var index := _jiggles.find(arm)
@@ -468,5 +468,14 @@ func _bounce(delta: float) -> void:
 		if _stretch[i] != 1.0:
 			var thin := 1.0 / sqrt(_stretch[i])
 			shape *= Vector3(thin, _stretch[i], thin)
-		_jiggles[i].basis = Basis.from_euler(_turned[i]) * Basis.from_scale(shape) # (keeps the head's look)
+		var turned := Basis.from_euler(_turned[i])
+		if _punch > 0.0 and _jiggles[i] == _hands.get("R"):
+			# The punch: aimed dead ahead, whatever the body's doing (the blade hangs along -y)
+			var ahead: Vector3 = (get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z
+			var y := -ahead.normalized()
+			var x := y.cross(Vector3.UP).normalized()
+			var aimed := Basis(x, y, x.cross(y))
+			var aim_local := (_parts[i].global_basis.orthonormalized().inverse() * aimed).orthonormalized()
+			turned = Basis(Quaternion(turned.orthonormalized()).slerp(Quaternion(aim_local), _punch))
+		_jiggles[i].basis = turned * Basis.from_scale(shape) # (keeps the head's look)
 	_springs_ready = true

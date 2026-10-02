@@ -60,7 +60,11 @@ func _ready() -> void:
 	_dash.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 24)
 	_dash.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_dash.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_dash.button_down.connect(func(): player.input.dash.emit())
+	_dash.button_down.connect(func():
+		player.input.dash_button_down = true
+		player.input.dash.emit()
+	)
+	_dash.button_up.connect(func(): player.input.dash_button_down = false)
 	root.add_child(_dash)
 
 	_build_panel(root)

@@ -9,6 +9,7 @@ render_mode cull_disabled;
 const int MAX_BLOBS = 32;
 uniform vec4 blobs[MAX_BLOBS]; // xy: centre (the plane's local x, z), z: unused, w: radius
 uniform int count = 0;
+uniform vec4 clip = vec4(-1e4, -1e4, 1e4, 1e4); // drawn only inside (min x, min z, max x, max z)
 uniform float smoothing = 0.32; // how far apart two puddles still reach for each other
 uniform float swell = 0.22; // how far in from the edge it takes to reach full height
 uniform vec3 sky_top : source_color = vec3(0.1, 0.12, 0.3);
@@ -40,7 +41,7 @@ float field(vec2 p) {
 void fragment() {
 	vec2 p = plane_pos;
 	float d = field(p);
-	if (d > 0.0) {
+	if (d > 0.0 || p.x < clip.x || p.y < clip.y || p.x > clip.z || p.y > clip.w) {
 		discard;
 	}
 	// The slope at the rim: steep at the very edge, flat across the middle
