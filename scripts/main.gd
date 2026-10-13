@@ -16,6 +16,7 @@ const Arena := preload("res://scripts/arena.gd")
 const Difficulty := preload("res://scripts/difficulty.gd")
 const Viewer := preload("res://scripts/viewer.gd")
 const Flags := preload("res://scripts/flags.gd")
+const SkyShow := preload("res://scripts/sky_show.gd")
 
 const BEST_FILE := "user://bests.cfg"
 const ARENA_SPEED := 13.0
@@ -53,6 +54,7 @@ var _smashes := 0 # enemies dashed through this game
 var _test_enemies := true # the test area's enemies (the TUNE panel switches them)
 var _sky: ShaderMaterial # shaders/sky.gdshader
 var _sun: DirectionalLight3D
+var sky_show: MeshInstance3D # what moves in the sky: comets and the rest (sky_show.gd)
 var _environment: Environment
 
 
@@ -73,6 +75,9 @@ func _ready() -> void:
 	cam = FollowCam.new()
 	cam.target = player
 	add_child(cam)
+	sky_show = SkyShow.new()
+	sky_show.cam = cam
+	add_child(sky_show)
 
 	n64 = CanvasLayer.new()
 	n64.layer = 1
@@ -170,6 +175,7 @@ func start_endless() -> void:
 	_play()
 	# (the moon and the far side of the ring are a long way off)
 	cam.far = 6000.0
+	sky_show.reach = 5600.0 # (out past the moon)
 	_environment.fog_density = 0.0016
 	_set_sky(Endless.ZONES[0], 0.0)
 	hud.banner("THE RING ROAD", Endless.ZONES[0].name)
@@ -289,6 +295,7 @@ func _play() -> void:
 	hud.enemies_switch.visible = mode == "test"
 	hud.set_arena(mode == "arena")
 	cam.far = 700.0
+	sky_show.reach = 650.0
 	_environment.fog_density = 0.004
 	player.reset_drops()
 	_smashes = 0
@@ -345,6 +352,8 @@ func _set_sky(look: Dictionary, time: float) -> void:
 	_sky.set_shader_parameter("space", look.get("space", 0.0))
 	_sky.set_shader_parameter("skyline", 1.0 - float(look.get("space", 0.0)))
 	_sky.set_shader_parameter("ring", look.get("ring", 0.0))
+	sky_show.visible = float(look.get("space", 0.0)) > 0.5
+	sky_show.set_tint(look.horizon)
 	if time <= 0.0:
 		_sky.set_shader_parameter("sky_top", look.top)
 		_sky.set_shader_parameter("horizon", look.horizon)

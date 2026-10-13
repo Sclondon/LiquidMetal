@@ -63,5 +63,17 @@ func _process(delta: float) -> bool:
 		3:
 			if t > 3.8:
 				_shot("4_crowd")
+				# The sky, with one of everything held in view
+				main.sky_show.showcase(true)
+				_look(Vector3(0.0, 30.0, 0.0), Vector3(40.0, 75.0, -60.0))
+				step = 4
+		4:
+			if t > 4.3:
+				_shot("5_sky")
+				_look(Vector3(0.0, 30.0, 0.0), Vector3(-60.0, 60.0, 50.0))
+				step = 5
+		5:
+			if t > 4.8:
+				_shot("6_sky")
 				return true
 	return false

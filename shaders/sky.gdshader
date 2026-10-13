@@ -27,6 +27,37 @@ float noise1(float x) {
 	return mix(hash(vec2(i, 0.0)), hash(vec2(i + 1.0, 0.0)), f * f * (3.0 - 2.0 * f));
 }
 
+float hash3(vec3 p) {
+	return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+float noise3(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(
+		mix(mix(hash3(i), hash3(i + vec3(1.0, 0.0, 0.0)), f.x), mix(hash3(i + vec3(0.0, 1.0, 0.0)), hash3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+		mix(mix(hash3(i + vec3(0.0, 0.0, 1.0)), hash3(i + vec3(1.0, 0.0, 1.0)), f.x), mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+}
+
+float fbm(vec3 p) {
+	return noise3(p) * 0.5 + noise3(p * 2.1 + 7.0) * 0.3 + noise3(p * 4.3 + 19.0) * 0.2;
+}
+
+// One layer of stars: the sky cut into cells (`scale` of them across a unit of direction), a star
+// in `density` of them, somewhere in its cell, round, `size` of the cell wide, its own colour
+// (blue-white through yellow to red) and brightness
+vec3 stars(vec3 d, float scale, float density, float size) {
+	vec3 g = d * scale;
+	vec3 id = floor(g);
+	vec3 where = vec3(hash3(id + 1.0), hash3(id + 2.0), hash3(id + 3.0)) - 0.5;
+	float away = length(fract(g) - 0.5 - where * 0.6);
+	float lit = step(1.0 - density, hash3(id + 17.0)) * (1.0 - smoothstep(size * 0.3, size, away));
+	float heat = hash3(id + 31.0);
+	vec3 tint = heat < 0.5 ? mix(vec3(0.6, 0.75, 1.0), vec3(1.0), heat * 2.0) : mix(vec3(1.0), vec3(1.0, 0.6, 0.4), (heat - 0.5) * 1.6);
+	return tint * lit * (0.25 + 0.75 * pow(hash3(id + 43.0), 3.0));
+}
+
 void sky() {
 	vec3 d = normalize(EYEDIR);
 	float y = d.y;
@@ -38,10 +69,33 @@ void sky() {
 	// (in space the sky's black nearly to the horizon: only a thin glow along it)
 	col = mix(col, sky_top + horizon * exp(-abs(y) * 16.0) * 0.3, space);
 
-	// Stars, fading out toward the horizon's glow
-	vec2 cell = floor(vec2(az * 260.0 / 3.1416, y * 260.0));
-	float star = step(0.9965, hash(cell)) * mix(smoothstep(0.12, 0.45, y), 1.0, space);
-	col += vec3(0.85, 0.9, 1.0) * star * (0.4 + 0.6 * hash(cell + 7.0)) * star_amount;
+	if (space > 0.5) {
+		// Deep sky: a river of stars and dust across it, clouds of glowing gas in the zone's
+		// colours, and stars of every size and temperature (what moves up there, the comets and
+		// the rest, is the sky show's: sky_show.gdshader)
+		vec3 across = normalize(vec3(0.55, 0.62, -0.56)); // the line through the river's poles
+		float off = dot(d, across);
+		float river = exp(-off * off * 14.0);
+		float dust = fbm(d * 5.0 + 3.0);
+		float lanes = smoothstep(0.34, 0.74, fbm(d * 9.0 + vec3(0.0, 4.0, 0.0) + dust));
+		vec3 warm = mix(horizon, vec3(1.0, 0.8, 0.6), 0.45);
+		vec3 cool = mix(vec3(horizon.b, horizon.r, horizon.g), vec3(0.4, 0.8, 1.0), 0.5);
+		col += mix(cool, warm, dust) * river * (0.05 + 0.2 * dust * dust) * (1.0 - lanes * 0.85);
+		// Gas clouds, off the river
+		float gas = smoothstep(0.52, 0.85, fbm(d * 2.3 + 11.0));
+		float gas_b = smoothstep(0.55, 0.9, fbm(d * 3.1 + 27.0));
+		col += horizon * gas * (0.05 + 0.12 * fbm(d * 14.0)) + cool * gas_b * (0.03 + 0.09 * fbm(d * 11.0 + 5.0));
+		// Stars: a fine dust of them (thicker in the river), then fewer and brighter
+		float crowd = 1.0 + river * 2.5 * (1.0 - lanes);
+		col += stars(d, 150.0, 0.22 * crowd, 0.2) * 0.55 * star_amount;
+		col += stars(d, 70.0, 0.1 * crowd, 0.2) * 1.2 * star_amount;
+		col += stars(d, 30.0, 0.05, 0.16) * 3.0 * star_amount;
+	} else {
+		// Stars, fading out toward the horizon's glow
+		vec2 cell = floor(vec2(az * 260.0 / 3.1416, y * 260.0));
+		float star = step(0.9965, hash(cell)) * smoothstep(0.12, 0.45, y);
+		col += vec3(0.85, 0.9, 1.0) * star * (0.4 + 0.6 * hash(cell + 7.0)) * star_amount;
+	}
 
 	// The sun: a soft glow all round it, the disc warm at the top and the horizon's colour below,
 	// cut by bands that thicken toward its foot
@@ -51,7 +105,7 @@ void sky() {
 	// (out in space it's a plain small star, not the striped sun)
 	float size = sun_size * mix(1.0, 0.4, space);
 	if (s < size && space > 0.5) {
-		col = mix(col, mix(horizon, vec3(1.0, 0.97, 0.9), 0.8) * 2.2, smoothstep(size, size * 0.9, s));
+		col = mix(col, mix(horizon, vec3(1.0, 0.97, 0.9), 0.8) * 2.2, 1.0 - smoothstep(size * 0.9, size, s));
 	} else if (s < sun_size && space < 0.5) {
 		float v = clamp((y - (sd.y - sun_size)) / (2.0 * sun_size), 0.0, 1.0); // 0 at its foot, 1 at its top
 		vec3 disc = mix(horizon * 1.4, vec3(1.0, 0.9, 0.55) * 1.8, v);
