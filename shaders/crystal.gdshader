@@ -1,4 +1,5 @@
 shader_type spatial;
+render_mode depth_draw_always;
 // A Crystalien's crystal (and their spires, kerbs and the shards that grow on everything): clear
 // stone you see through. What's behind it shows, bent by each facet and split a little into
 // colours at the edges, stained the crystal's colour; inside, planes of fracture catch the light;

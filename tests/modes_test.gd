@@ -79,8 +79,8 @@ func _process(delta: float) -> bool:
 				_check("movers: %d blocks sliding (one is %.1f m from where it was); %d wall splats, %d bursts in 40 s" % [arena._movers.size(), moved, walls, bursts],
 					arena._movers.size() == 9 and moved > 1.0)
 			"open":
-				_check("open: nothing in the arena (%d things besides the pads); %d wall splats, %d bursts in 40 s" % [arena._course.get_child_count() - 4, walls, bursts],
-					arena._course.get_child_count() == 4)
+				_check("open: nothing in the arena (%d stones); %d wall splats, %d bursts in 40 s" % [arena._course.get_child_count(), walls, bursts],
+					arena._course.get_child_count() == 0)
 		at += 1
 		if at >= MODES.size():
 			for line in log:

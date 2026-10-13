@@ -7,6 +7,7 @@ var main: Node
 var t := 0.0
 var step := 0
 var bot := {}
+var slashed := false
 
 
 func _initialize() -> void:
@@ -14,6 +15,7 @@ func _initialize() -> void:
 	main.start_mode = "arena"
 	main.use_pads = false
 	main.arena_round = 22.0
+	main.arena_mode = "open"
 	root.add_child(main)
 
 
@@ -29,6 +31,9 @@ func _process(delta: float) -> bool:
 		return false
 	if step != 3:
 		arena.runners[arena.me].safe = 1.0 # (left alone while the pictures are set up)
+	if t > 5.2 and not slashed:
+		slashed = true
+		_shot("2b_slash") # (the wall the dash left)
 	match step:
 		0:
 			if t > 1.2:

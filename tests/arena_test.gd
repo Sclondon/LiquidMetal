@@ -2,7 +2,8 @@ extends SceneTree
 ## Headless check of the arena's battle room, run here with bots (arena_room.gd): he's let into a
 ## laid-out room with five bots; running over a drop adds to his mass; the bots feed too; dashing
 ## through a bot bursts it (mass to him, drops on the floor) and it comes back; a wall splats him
-## and he comes back small; the round ends on the clock and a new one starts.
+## and he comes back small; the layout changes while the round's on; the round ends on the clock
+## and a new one starts.
 ## Run: godot --headless --fixed-fps 60 --path . -s res://tests/arena_test.gd
 
 var main: Node
@@ -15,6 +16,7 @@ var before := 0
 var floor_drops := 0
 var rounds := { over = 0, started = 0 }
 var wall_deaths := 0
+var layouts: Array = [] # each layout the arena has had, in turn
 
 
 func _initialize() -> void:
@@ -23,6 +25,7 @@ func _initialize() -> void:
 	main.use_pads = false
 	main.arena_round = 45.0
 	main.arena_mode = "blocks"
+	main.arena_layout_time = 18.0
 	root.add_child(main)
 
 
@@ -35,6 +38,8 @@ func _process(delta: float) -> bool:
 	total += delta
 	var p: CharacterBody3D = main.player
 	var arena: Node = main.area
+	if arena.me != 0 and (layouts.is_empty() or layouts[-1] != arena.mode):
+		layouts.append(arena.mode)
 	if step > 0 and step < 6:
 		p.run_speed = 0.0 # standing in the middle of nowhere, so the test decides what he touches
 	match step:
@@ -109,8 +114,9 @@ func _process(delta: float) -> bool:
 		6:
 			p.run_speed = 0.0
 			if rounds.started > 0:
-				_check("the round ends on the clock and a new one starts, laid out another way: %s (%.0f s in; %d bot wall splats)" % [arena.mode, total, wall_deaths],
-					rounds.over == 1 and arena.phase == "play" and arena.my_mass() == 10 and arena.drops.size() >= 110 and arena.mode != "blocks")
+				_check("the round ends on the clock and a new one starts, (%.0f s in; %d bot wall splats)" % [total, wall_deaths],
+					rounds.over == 1 and arena.phase == "play" and arena.my_mass() == 10 and arena.drops.size() >= 110)
+				_check("the layout changed while the round was on, and again for the new round (%s)" % " -> ".join(layouts), layouts.size() >= 3)
 				step = 7
 	if step == 7 or total > 90.0:
 		if step != 7:

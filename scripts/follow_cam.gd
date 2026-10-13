@@ -17,6 +17,8 @@ var _pitch := 0.0 # -1 (down low) .. 1 (up over him), eased
 const ORBIT_RATE := 3.2 # radians a second at full tilt
 const RETURN_DELAY := 0.6 # seconds after letting go before it swings back behind
 var _released_for := 0.0
+var _jolt := 0.0 # 1 as a dash goes off, shaking out
+var _was_dashing := false
 var _zoom := 1.0 # pulled back as he grows (the arena)
 
 
@@ -84,5 +86,14 @@ func _process(delta: float) -> void:
 		keep_aspect = Camera3D.KEEP_HEIGHT
 		fov = 64.0 + target.run_speed * 0.4
 	# A kick wider on a dash
-	_dash_fov = lerpf(_dash_fov, 12.0 if target.is_dashing() else 0.0, 1.0 - exp(-get_process_delta_time() * 10.0))
+	# (and a jolt as the slash goes off)
+	var dashing: bool = target.is_dashing()
+	if dashing and not _was_dashing:
+		_jolt = 1.0
+	_was_dashing = dashing
+	_jolt = move_toward(_jolt, 0.0, get_process_delta_time() * 4.0)
+	if _jolt > 0.0:
+		h_offset = sin(Time.get_ticks_msec() * 0.09) * 0.12 * _jolt
+		v_offset = cos(Time.get_ticks_msec() * 0.11) * 0.09 * _jolt
+	_dash_fov = lerpf(_dash_fov, 20.0 if dashing else 0.0, 1.0 - exp(-get_process_delta_time() * 12.0))
 	fov += _dash_fov

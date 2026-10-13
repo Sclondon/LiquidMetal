@@ -83,6 +83,13 @@ var _course: Node3D
 var _colosseum: Node3D
 var _movers: Array = [] # [{ body, home, travel, period, start }]
 var _round_clock := 0.0 # seconds into the round (the sliding blocks are placed by it)
+var _layout_from := 0.0 # seconds into the round this layout came in (its blocks slide from then)
+var _coming := {} # a change of layout the room has warned of ("layout"), and
+var _coming_in := 0.0 # the seconds left before it comes in
+var _risen := 1.0 # 0..1: this layout's stones up out of the sand
+var _leaving: Array = [] # the last layout's stones, going down: { node, sunk 0..1 }
+var _pads_laid := false
+var layout_time := 0.0 # a room run here: seconds between changes of layout (0: the usual)
 var _materials := {}
 var _drop_mesh := SphereMesh.new()
 var _send_clock := 0.0
@@ -150,6 +157,8 @@ func _go_local() -> void:
 	if round_time > 0.0:
 		room.round_time = round_time
 	room.first_mode = first_mode
+	if layout_time > 0.0:
+		room.layout_time = layout_time
 	_use_room(room)
 	room.open(player_name)
 
@@ -174,7 +183,7 @@ func _on_message(m: Dictionary) -> void:
 	match str(m.get("t")):
 		"welcome":
 			me = int(m.you)
-			_lay_out(m)
+			_lay_out(m, false)
 			_round_clock = float(m.get("at", 0.0)) / 1000.0
 			_set_drops(m.drops)
 			for e in m.ents:
@@ -224,6 +233,14 @@ func _on_message(m: Dictionary) -> void:
 				if not r.mine:
 					r.placed = false # (stood back up where its next state puts it)
 				_apply_mass(r)
+		"layout":
+			# The arena's about to change: a warning (and where the pit will open), then it does
+			_coming = m
+			_coming_in = float(m.get("in", 3500.0)) / 1000.0
+			var next := str(m.get("mode", "blocks"))
+			status.emit(MODE_NAMES.get(next, MODE_NAMES.blocks)[0], "the arena's changing")
+			_colosseum.warn_pit(float(m.get("pit", 0.0)))
+			_colosseum.cheer(0.6)
 		"over":
 			phase = "over"
 			time_left = float(m.next) / 1000.0
@@ -403,12 +420,19 @@ func _on_kill(m: Dictionary) -> void:
 	_apply_mass(v)
 	if a.is_empty():
 		var fell: bool = m.get("how") == "pit"
+		if fell:
+			_colosseum.gasp()
 		feed.emit("%s fell in the pit" % v.name if fell else "%s hit a wall" % v.name)
 		if v.id == me:
 			status.emit("GONE" if fell else "SPLAT", "lost %d" % int(m.lost))
 		return
-	feed.emit("%s burst %s" % [a.name, v.name])
-	_colosseum.cheer(0.7)
+	feed.emit("%s ran into %s's wall" % [v.name, a.name] if m.get("how") == "trail" else "%s burst %s" % [a.name, v.name])
+	# The crowd: up on its feet, a wave round from where it happened, lit in the winner's colour
+	# (louder the more mass went)
+	_colosseum.cheer(clampf(0.55 + float(m.lost) / 120.0, 0.55, 1.0))
+	if is_instance_valid(v.body):
+		_colosseum.wave(v.body.global_position)
+	_colosseum.flash(Color(0.85, 0.92, 1.0) if a.id == me or not a.bot else a.tint.horizon)
 	if a.id == me:
 		smashes += 1
 		status.emit("BURST!", "%s  +%d" % [v.name, gained])
@@ -439,9 +463,28 @@ func _physics_process(delta: float) -> void:
 	time_left = maxf(time_left - delta, 0.0)
 	if phase == "play":
 		_round_clock += delta
+	if not _coming.is_empty():
+		_coming_in -= delta
+		if _coming_in <= 0.0:
+			var change := _coming
+			_coming = {}
+			_lay_out(change)
+			_set_drops(change.drops)
+	_risen = minf(_risen + delta / 1.1, 1.0)
+	for i in range(_leaving.size() - 1, -1, -1):
+		var going: Dictionary = _leaving[i]
+		going.sunk = minf(going.sunk + delta / 1.0, 1.0)
+		(going.node as Node3D).position.y = -smoothstep(0.0, 1.0, float(going.sunk)) * 7.0
+		if going.sunk >= 1.0:
+			going.node.queue_free()
+			_leaving.remove_at(i)
+	var sunk := (1.0 - smoothstep(0.0, 1.0, _risen)) * 6.5
+	for stone in _course.get_children():
+		if stone is StaticBody3D:
+			stone.position.y = float(stone.get_meta("y", stone.position.y)) - sunk
 	for mover in _movers:
-		var swing := sin(TAU * (_round_clock / float(mover.period) + float(mover.start)))
-		mover.body.position = mover.home + mover.travel * swing
+		var swing := sin(TAU * (maxf(_round_clock - _layout_from, 0.0) / float(mover.period) + float(mover.start)))
+		mover.body.position = mover.home + mover.travel * swing + Vector3.DOWN * sunk
 	for drop in drops.values():
 		if drop.taken > 0.0:
 			drop.taken -= delta
@@ -479,6 +522,13 @@ func _physics_process(delta: float) -> void:
 		_try_drops(r)
 		if r.safe <= 0.0 and r.wait <= 0.0:
 			_try_hits(r)
+		if r.safe <= 0.0 and r.wait <= 0.0:
+			# Run into the wall somebody else's dash left: burst, and theirs the credit
+			for other in runners.values():
+				if other.id != r.id and is_instance_valid(other.body) and other.body.wall_hits(body.global_position + Vector3.UP * 0.5, 0.45 * body.size):
+					r.wait = 0.6
+					_room.send({ t = "died", e = r.id, how = "trail", by = other.id })
+					break
 	_send_clock -= delta
 	if _send_clock <= 0.0 and out.size() > 1:
 		_send_clock = SEND_EVERY
@@ -579,12 +629,16 @@ func _remove_drop(id: int) -> void:
 ## the floor (with the pit, if there is one), the blocks (cover) and slabs (to jump)
 ## [[x, z, width, height, depth, turn, kind], ...], the sliding blocks [[x, z, width, height,
 ## depth, turn, travel x, travel z, seconds there and back, start 0..1], ...], and four boost pads
-func _lay_out(m: Dictionary) -> void:
+func _lay_out(m: Dictionary, rise := true) -> void:
 	if _course:
-		_course.free()
+		# What was there goes down into the sand (and is gone once it's under)
+		_leaving.append({ node = _course, sunk = 0.0 })
 	_course = Node3D.new()
 	add_child(_course)
 	_movers.clear()
+	_coming = {}
+	_risen = 0.0 if rise else 1.0 # (and what's coming, comes up out of it)
+	_layout_from = float(m.get("t0", 0.0)) / 1000.0
 	mode = str(m.get("mode", "blocks"))
 	if not MODE_NAMES.has(mode):
 		mode = "blocks"
@@ -599,13 +653,16 @@ func _lay_out(m: Dictionary) -> void:
 		var home := Vector3(float(b[0]), size.y * 0.5, float(b[1]))
 		var body := _block(size, home, MOVER_COLOR, float(b[5]), true)
 		_movers.append({ body = body, home = home, travel = Vector3(float(b[6]), 0.0, float(b[7])), period = maxf(float(b[8]), 1.0), start = float(b[9]) })
+	if _pads_laid:
+		return
+	_pads_laid = true # (the boosts stay where they are through every layout)
 	for k in 4:
 		var pad := BoostPad.new()
 		var angle := k * TAU / 4.0 + PI / 4.0
 		pad.position = Vector3(cos(angle), 0.0, sin(angle)) * half * 0.55
 		pad.rotation.y = -angle + PI / 2.0 # (boosting round the arena)
 		pad.collision_mask = 1 | 2 # (the room's runners are all on layer 2)
-		_course.add_child(pad)
+		add_child(pad)
 
 
 func _material(color: Color) -> ShaderMaterial:
@@ -617,6 +674,9 @@ func _material(color: Color) -> ShaderMaterial:
 	return _materials[color]
 
 
+## A stone in the arena: a box to run into (or jump, if it's low), drawn as a stand of crystals
+## that fills it: tall ones side by side for a block, a low jagged ridge for a slab (no higher
+## than it can be jumped)
 func _block(size: Vector3, center: Vector3, color: Color, yaw := 0.0, moving := false) -> PhysicsBody3D:
 	var body: PhysicsBody3D = AnimatableBody3D.new() if moving else StaticBody3D.new()
 	body.position = center
@@ -626,33 +686,40 @@ func _block(size: Vector3, center: Vector3, color: Color, yaw := 0.0, moving := 
 	var collider := CollisionShape3D.new()
 	collider.shape = shape
 	body.add_child(collider)
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	var view := MeshInstance3D.new()
-	view.mesh = mesh
-	view.material_override = _material(color)
-	body.add_child(view)
-	# Crystals growing out of it: tall ones from a block's top, a low jagged row along a slab (no
-	# higher than it can be jumped)
 	var low := size.y < 1.0
 	var growth := SurfaceTool.new()
 	growth.begin(Mesh.PRIMITIVE_TRIANGLES)
 	growth.set_smooth_group(-1)
-	for k in 5 if low else 4:
-		var spot := Vector3(_rng.randf_range(-0.38, 0.38) * size.x, 0.0, _rng.randf_range(-0.3, 0.3) * size.z)
-		var lean := Basis(Vector3.UP, _rng.randf() * TAU) * Basis(Vector3.RIGHT, _rng.randf_range(-0.3, 0.3))
+	# Along its longer side, a crystal every so often, each about as thick as the box is deep
+	var long_x := size.x >= size.z
+	var length := maxf(size.x, size.z)
+	var depth := minf(size.x, size.z)
+	var count := maxi(2, roundi(length / maxf(depth * 0.8, 0.9)))
+	for k in count:
+		var along := (float(k) + 0.5) / count - 0.5 + _rng.randf_range(-0.12, 0.12) / count
+		var spot := Vector3(along * length, 0.0, _rng.randf_range(-0.1, 0.1) * depth) if long_x else Vector3(_rng.randf_range(-0.1, 0.1) * depth, 0.0, along * length)
+		var lean := Basis(Vector3.UP, _rng.randf() * TAU) * Basis(Vector3.RIGHT, _rng.randf_range(-0.14, 0.14))
+		var thick := depth * _rng.randf_range(0.5, 0.62)
 		if low:
-			spot.y = size.y * 0.5
-			Crystal.add_shard(growth, Transform3D(lean, spot), 0.22, 0.22, 0.5, 0.2)
+			# Squat, pointed, the tips just over the top of the box
+			var tall := size.y * _rng.randf_range(1.5, 2.1)
+			Crystal.add_shard(growth, Transform3D(lean, spot + Vector3.UP * (size.y * 0.5 - tall * 0.34)), thick, thick, tall, 0.25)
 		else:
-			var tall := size.y * _rng.randf_range(0.5, 0.9)
-			spot.y = size.y * 0.5 + tall * 0.15
-			Crystal.add_shard(growth, Transform3D(lean, spot), minf(size.x, size.z) * 0.22, minf(size.x, size.z) * 0.22, tall, 0.4)
+			# Standing from the ground to about the top of the box (a point above it, a point buried)
+			var tall := size.y * _rng.randf_range(1.05, 1.3)
+			Crystal.add_shard(growth, Transform3D(lean, spot + Vector3.UP * (tall * 0.36 - size.y * 0.5)), thick, thick, tall * 1.25, 0.55)
+			# ...and a smaller one or two grown against its foot
+			for extra in _rng.randi_range(0, 2):
+				var beside := spot + Vector3(_rng.randf_range(-0.5, 0.5), 0.0, _rng.randf_range(-0.5, 0.5)).normalized() * thick * 0.9
+				var small := size.y * _rng.randf_range(0.3, 0.55)
+				var out := Basis(Vector3.UP, _rng.randf() * TAU) * Basis(Vector3.RIGHT, _rng.randf_range(0.2, 0.5))
+				Crystal.add_shard(growth, Transform3D(out, beside + Vector3.UP * (small * 0.3 - size.y * 0.5)), thick * 0.35, thick * 0.35, small, 0.4)
 	growth.generate_normals()
 	var shards := MeshInstance3D.new()
 	shards.mesh = growth.commit()
-	shards.material_override = _crystal_material(color)
+	shards.material_override = _material(color)
 	body.add_child(shards)
+	body.set_meta("y", center.y) # (where it stands once it's risen)
 	_course.add_child(body)
 	return body
 

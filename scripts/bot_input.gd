@@ -55,6 +55,14 @@ func _physics_process(delta: float) -> void:
 	if _hold_line > 0.0:
 		steer *= 0.2
 	turn = clampf(steer + _swerve, -1.0, 1.0)
+	# A wall somebody's dash left, just ahead: round it
+	var ahead_of: Vector3 = here + body.forward() * 4.5 + Vector3.UP * 0.5
+	for other_id in arena.runners:
+		var other: Dictionary = arena.runners[other_id]
+		if other_id != id and is_instance_valid(other.body) and other.body.wall_hits(ahead_of, 1.3):
+			_swerve = 1.0 if _swerve >= 0.0 else -1.0
+			break
+	turn = clampf(steer + _swerve, -1.0, 1.0)
 	# Lined up on it, close, nothing in the way: slash
 	if _prey != 0 and _rest <= 0.0 and body.dash_cooldown <= 0.0 and absf(off) < 0.22 and to_aim.length() < DASH_RANGE and absf(_swerve) < 0.1:
 		var space := body.get_world_3d().direct_space_state

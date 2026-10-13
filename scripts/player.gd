@@ -94,6 +94,7 @@ var rewind_on_splat := true # false (endless mode): a splat ends the run, no com
 var dash_cooldown := 0.0
 var speed := 0.0 # actual speed: builds up to run_speed (the legs pump hard getting there)
 const ACCELERATION := 9.0 # m/s per second
+const PUDDLE_DRAG := 3.2 # m/s per second lost sliding along as a puddle
 const BRAKING := 24.0 # m/s per second, slowing down on the brake
 var braking := 0.0 # 0..1, how hard the brake's on
 var _pool_size := 0.0 # the puddle's size, on a wobbly spring
@@ -127,8 +128,8 @@ var _pool_offset := Vector3.ZERO # where the puddle sits under him
 var _look_clock := 0.0
 var _bounce_t := 9.0
 var _dash_kick := 0.0
-const PUNCHES := ["L", "R", "both"] # each dash's slash in turn: left blade, right, then the X
-var _punch_index := 2
+const PUNCHES := ["both"] # the dash's slash: always the X, both blades scissoring across
+var _punch_index := 0
 var _punch := 0.0
 var _floor_y := 0.0
 var _exploded := false # blown up: its blobs splat anywhere as little puddles # the floor's height, last time he was on it
@@ -251,6 +252,16 @@ func _ready() -> void:
 
 	_trail.material = _figure_material
 	add_child(_trail)
+	_wall.material = _figure_material
+	add_child(_wall)
+	if crystal:
+		# Nothing liquid about a Crystalien: no blobs come off it, it leaves no tracks or puddles of
+		# metal (little crystals sprout at its heels instead), and what it breaks into is shards
+		_droplets.parts = []
+		_trail.visible = false
+		_crystal_trail = preload("res://scripts/crystal_trail.gd").new()
+		_crystal_trail.material = _figure_material
+		add_child(_crystal_trail)
 
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(SURFACE_SIZE, SURFACE_SIZE)
@@ -517,7 +528,10 @@ func boost() -> void:
 func _launch_punch() -> void:
 	_dash_power = 1.0 + _charge * 1.2
 	_dash_left = DASH_TIME * (1.0 + _charge)
-	_droplets.burst(5 + int(_charge * 6.0), 1.3 + _charge)
+	_droplets.burst(12 + int(_charge * 8.0), 1.8 + _charge) # (metal flung off the blades)
+	_squash = -0.4
+	_agitation = 1.0
+	_figure.ripple_all(1.0)
 	_charge = 0.0
 
 
@@ -558,6 +572,12 @@ func set_tint(tint: Dictionary) -> void:
 # runner: no collisions at all, moved by the states their game sends.
 
 var puppet := false
+## The wall a dash leaves: a sheet of his metal standing along its line for a couple of seconds
+## (metal_wall.gd). Others who run into it are burst.
+var _wall := preload("res://scripts/metal_wall.gd").new()
+var _crystal_trail: MultiMeshInstance3D # (a Crystalien's: crystal_trail.gd)
+var _shards: Array[Dictionary] = [] # a shattered Crystalien's pieces: { view, velocity, spin, age }
+var _ghost_dab := MeshInstance3D.new() # (what a Crystalien gets when it asks for a puddle: nothing)
 ## A Crystalien (the arena's bots): cut from crystal, not liquid metal. Set before it's in the tree.
 var crystal := false
 var size := 1.0 # grown with its mass (the arena sets it)
@@ -600,6 +620,7 @@ func make_puppet() -> void:
 
 func set_size(to: float) -> void:
 	size = to
+	_wall.height = 2.0 * to
 	_set_shape(PUDDLE if ducking else STAND)
 
 
@@ -683,6 +704,10 @@ func _puppet_step(delta: float) -> void:
 	speed = _net_speed
 	run_speed = maxf(_net_speed, 1.0)
 	_dash_left = maxf(_dash_left - delta, 0.0)
+	if _dash_left > 0.0 and _net_floor:
+		_wall.extend(global_position)
+	else:
+		_wall.stop()
 
 
 ## Dashed through: bursts into blobs of liquid metal flung on with the hit
@@ -696,7 +721,8 @@ func blow_up(push: Vector3) -> void:
 	_figure.visible = false
 	_blob.visible = false
 	_crash_burst(global_position, Vector3.ZERO)
-	_splash.restart()
+	if not crystal:
+		_splash.restart()
 	_droplets.clear()
 	_trail.lift()
 	for spray in _foot_splash:
@@ -708,6 +734,42 @@ func blow_up(push: Vector3) -> void:
 
 func is_dashing() -> bool:
 	return _dash_left > 0.0
+
+
+## The story's: a shudder goes through him (every part ripples, drops shake loose)
+func shiver() -> void:
+	_agitation = 1.0
+	_figure.ripple_all(1.0)
+	_droplets.burst(10, 0.9)
+
+
+## The story's: puddles of his metal lying round him lift and run back into him
+func gather() -> void:
+	for k in 9:
+		var angle := k * TAU / 9.0 + randf() * 0.4
+		_dab(global_position + Vector3(cos(angle), 0.0, sin(angle)) * randf_range(1.6, 3.2), -1, k * 0.09, 1.5, Vector3.UP, 0.35)
+
+
+## The story's: his head tipped back (0..1), and how hard his eye burns (0..1)
+func look_up(amount: float) -> void:
+	_figure.chin_up = amount
+
+
+func eye_glow(amount: float) -> void:
+	_figure.set_eye_glow(amount)
+
+
+## The story's: metal flies off him
+func flourish() -> void:
+	_agitation = 1.0
+	_squash = -0.4
+	_figure.ripple_all(1.0)
+	_droplets.burst(24, 2.2)
+
+
+## Whether something `radius` wide at `point` is in the wall one of his dashes left standing
+func wall_hits(point: Vector3, radius: float) -> bool:
+	return _wall.hits(point, radius)
 
 
 ## A burst of speed straight ahead, then a cooldown
@@ -751,6 +813,10 @@ func _physics_process(delta: float) -> void:
 	braking = clampf(input.brake, 0.0, 1.0) if "brake" in input else 0.0
 	var cruise := run_speed * (1.0 - braking)
 	var rate := BRAKING if braking > 0.0 and speed > cruise else ACCELERATION
+	if _sink > 0.3:
+		# A puddle has no legs: it slides on, losing way slowly, till it's still
+		cruise = 0.0
+		rate = PUDDLE_DRAG
 	speed = move_toward(speed, cruise, rate * delta) # (a slide keeps its speed)
 	var going := speed
 	if _dash_left > 0.0:
@@ -763,6 +829,16 @@ func _physics_process(delta: float) -> void:
 	velocity.z = ground.z
 	_last_velocity = velocity
 	move_and_slide()
+	# The dash's wall, laid along the ground behind him
+	if is_dashing() and is_on_floor():
+		_wall.extend(global_position)
+	else:
+		_wall.stop()
+	# A chaser that runs into the wall he left is burst by it
+	if is_enemy and "target" in input and input.target != null and input.target.has_method("wall_hits") and input.target.wall_hits(global_position + Vector3.UP * 0.5, 0.5):
+		blow_up(velocity)
+		input.target.smashed.emit()
+		return
 
 	# Head-on into something: splat (glancing blows just slide along it). A wall alongside, in
 	# the air, is one to run on.
@@ -872,6 +948,7 @@ func _process(delta: float) -> void:
 	_material.set_shader_parameter("agitation", _agitation)
 	_figure_material.set_shader_parameter("agitation", _agitation)
 	_update_crash(delta)
+	_update_shards(delta)
 	_feed_wall_surface()
 	if dead:
 		_feed_surface() # (the crash's floor splats)
@@ -887,7 +964,7 @@ func _process(delta: float) -> void:
 	# Held for a beat, he sinks right down into it: the little puddles run together into one big one
 	var sinking: bool = ducking and _slide_clock > SINK_DELAY and input.duck_held()
 	var was_sunk := _sink
-	_sink = move_toward(_sink, 1.0 if sinking else 0.0, delta * (4.0 if sinking else 9.0))
+	_sink = move_toward(_sink, 1.0 if sinking and not crystal else 0.0, delta * (4.0 if sinking else 9.0)) # (crystal doesn't sink into a puddle)
 	if _sink > 0.05 and was_sunk <= 0.05:
 		_merge_slide_dabs()
 		_pool_velocity += 3.0
@@ -938,7 +1015,7 @@ func _process(delta: float) -> void:
 		var across := up.cross(back).normalized()
 		var on_wall := Basis(across, up, across.cross(up)) * spin
 		turn = Basis(Quaternion(turn.orthonormalized()).slerp(Quaternion(on_wall.orthonormalized()), smoothstep(0.0, 1.0, _wall_roll)))
-	var middle := Vector3.UP * 0.9 * size
+	var middle := Vector3.UP * 0.9
 	var hop := 0.0
 	if _hop_left > 0.0:
 		_hop_left = maxf(_hop_left - delta, 0.0)
@@ -946,11 +1023,12 @@ func _process(delta: float) -> void:
 	# Splatting: squashed flat and spread wide, about its feet (so it stays on the floor)
 	var sunk := smoothstep(0.0, 1.0, _sink)
 	var flat := Vector3(1.0 + sunk * 0.5, (1.0 - melt * 0.25) * (1.0 - sunk * 0.95), 1.0 + sunk * 0.5) # held low in the dive, then sinking in
-	var body := turn * Basis.from_scale(stretch * flat * size)
+	var body := turn * Basis.from_scale(stretch * flat)
 	var pivot := middle.lerp(Vector3.ZERO, melt)
 	# (on the wall: feet on its face, which is half a body-width off, at the capsule's middle)
 	var wall_spot := Vector3.UP * 0.65 - _wall_normal * 0.5
-	_figure.transform = Transform3D(body, (pivot - body * pivot + Vector3.UP * hop * (1.0 - melt)).lerp(wall_spot, smoothstep(0.0, 1.0, _wall_roll)))
+	# (grown with its mass: bigger about its feet, which stay on the floor)
+	_figure.transform = Transform3D(body.scaled(Vector3.ONE * size), (pivot - body * pivot + Vector3.UP * hop * (1.0 - melt)).lerp(wall_spot, smoothstep(0.0, 1.0, _wall_roll)) * size)
 	var pose_steer := 0.0 if wall_running else steer
 	_look_around(delta)
 	var tucked := (not grounded() and not wall_running) or _dodge_left > 0.0
@@ -1010,8 +1088,10 @@ func _process(delta: float) -> void:
 		var at := to_local(foot_spots[f])
 		spray.position = Vector3(at.x, 0.05, at.z)
 		spray.rotation.y = heading
-		spray.emitting = running and foot_spots[f].y - global_position.y < 0.15 # only while it's down
+		spray.emitting = running and not crystal and foot_spots[f].y - global_position.y < 0.15 # only while it's down
 	var ground := global_position.y if grounded() else NAN
+	if _crystal_trail:
+		_crystal_trail.step(_figure.feet(), ground, delta)
 	# The puddles carried along under what made them (landing and dive alike)
 	var feet_now := _figure.feet()
 	for dab in _dabs:
@@ -1192,7 +1272,53 @@ func _look_around(delta: float) -> void:
 ## A crash: every part of him (and a few more besides) flies on as a blob of liquid with the
 ## speed he had, and splats on whatever it hits: the wall's splats melt together on it, and any
 ## that drop to the floor join the floor's puddles
+## A Crystalien breaking: its parts and a scatter of splinters thrown the way it was going,
+## tumbling, bouncing once or twice on the ground, then shrinking away
+func _shatter() -> void:
+	var shard_mesh := preload("res://scripts/crystal.gd").shard(0.5, 1.6, 0.35, 5)
+	var starts: Array[Vector3] = []
+	for part in _figure.parts():
+		starts.append(part.global_position)
+		starts.append(part.global_position + Vector3(randf_range(-0.2, 0.2), randf_range(-0.2, 0.2), randf_range(-0.2, 0.2)))
+	for k in 10:
+		starts.append(global_position + Vector3(randf_range(-0.4, 0.4), randf_range(0.2, 1.7), randf_range(-0.4, 0.4)) * size)
+	for at in starts:
+		var view := MeshInstance3D.new()
+		view.mesh = shard_mesh
+		view.material_override = _figure_material
+		view.top_level = true
+		add_child(view)
+		var big := randf_range(0.08, 0.3) * size
+		view.global_transform = Transform3D(Basis(Vector3(randf(), randf(), randf()).normalized(), randf() * TAU).scaled(Vector3.ONE * big), at)
+		var fling := _last_velocity * randf_range(0.3, 0.9) + Vector3(randf_range(-6.0, 6.0), randf_range(2.0, 9.0), randf_range(-6.0, 6.0))
+		_shards.append({ view = view, velocity = fling, spin = Vector3(randf_range(-9.0, 9.0), randf_range(-9.0, 9.0), randf_range(-9.0, 9.0)), age = 0.0, big = big })
+
+
+func _update_shards(delta: float) -> void:
+	for i in range(_shards.size() - 1, -1, -1):
+		var shard: Dictionary = _shards[i]
+		var view: MeshInstance3D = shard.view
+		shard.age += delta
+		shard.velocity += Vector3.DOWN * GRAVITY * 0.8 * delta
+		var at: Vector3 = view.global_position + shard.velocity * delta
+		if at.y < _floor_y + 0.08 and shard.velocity.y < 0.0 and at.y > _floor_y - 1.0:
+			# Off the ground: most of its speed gone, still turning over
+			at.y = _floor_y + 0.08
+			shard.velocity = Vector3(shard.velocity.x * 0.5, -shard.velocity.y * 0.35, shard.velocity.z * 0.5)
+			shard.spin *= 0.6
+		var turned := Basis.from_euler(shard.spin * delta) * view.global_basis.orthonormalized()
+		var left := 1.0 - smoothstep(1.6, 2.4, float(shard.age))
+		view.global_transform = Transform3D(turned.scaled(Vector3.ONE * maxf(float(shard.big) * left, 0.001)), at)
+		if shard.age > 2.4:
+			view.queue_free()
+			_shards.remove_at(i)
+
+
 func _crash_burst(point: Vector3, normal: Vector3, collider: Object = null) -> void:
+	if crystal:
+		_blob.visible = false
+		_shatter()
+		return
 	var flat := Vector3(normal.x, 0.0, normal.z).normalized()
 	if flat == Vector3.ZERO:
 		flat = -forward()
@@ -1376,14 +1502,14 @@ func _shrink_dab(dab: MeshInstance3D, time := 0.12) -> void:
 	dab.set_meta("follow", -1)
 	if dab.has_meta("merge"):
 		dab.remove_meta("merge")
-	var tween := create_tween()
-	tween.tween_property(dab, "scale", Vector3(0.01, 0.01, 0.01), time).set_ease(Tween.EASE_IN)
-	tween.tween_callback(func(): dab.visible = false)
+	_resorb(dab, create_tween(), maxf(time, 0.22))
 
 
 ## A little puddle on the floor under a contact point of the superhero landing (follow: 0 / 1 the
 ## left / right foot, 2 the hand), carried along under it as it slides
 func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := Vector3.UP, linger := 0.5) -> MeshInstance3D:
+	if crystal:
+		return _ghost_dab
 	var dab: MeshInstance3D = null
 	for d in _dabs:
 		if not d.visible:
@@ -1420,12 +1546,41 @@ func _dab(at: Vector3, follow := -1, delay := 0.0, size_scale := 1.0, normal := 
 	)
 	tween.tween_property(dab, "scale", Vector3(size, 0.08, size * randf_range(0.8, 1.3)), 0.25).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 	tween.tween_interval(linger)
-	tween.tween_property(dab, "scale", Vector3(0.01, 0.01, 0.01), 0.6).set_ease(Tween.EASE_IN)
-	tween.tween_callback(func(): dab.visible = false)
+	_resorb(dab, tween, 0.4)
 	return dab
 
 
+## A puddle of his metal going: it lifts off whatever it's on, runs to him as a drop and is taken
+## back in (he ripples where it joins). Too far behind, or with him splatted, it just shrinks away.
+func _resorb(dab: MeshInstance3D, tween: Tween, time: float) -> void:
+	var from := { set = false, at = Vector3.ZERO, size = Vector3.ONE, reach = true }
+	tween.tween_method(func(t: float):
+		if not from.set:
+			from.set = true
+			from.at = dab.global_position
+			from.size = dab.scale
+			from.reach = not dead and dab.global_position.distance_to(global_position) < 14.0
+		if not from.reach:
+			dab.scale = (from.size as Vector3).lerp(Vector3.ONE * 0.01, t)
+			return
+		var home := global_position + Vector3.UP * 0.7 * size
+		var pull := t * t
+		dab.global_position = (from.at as Vector3).lerp(home, pull) + Vector3.UP * sin(t * PI) * 0.35
+		# (gathering into a bead as it leaves the ground, then small as it goes in)
+		var bead: float = maxf((from.size as Vector3).x, 0.1) * 0.5
+		dab.scale = (from.size as Vector3).lerp(Vector3.ONE * bead, minf(t * 3.0, 1.0)) * (1.0 - pull * 0.85)
+		dab.layers = 1 << (OWN_LAYER - 1) # (a drop in the air now, not part of the floor's surface)
+	, 0.0, 1.0, time).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tween.tween_callback(func():
+		dab.visible = false
+		if from.reach and not dead:
+			_figure.ripple_all(0.35)
+	)
+
+
 func _land_splat() -> void:
+	if crystal:
+		return
 	_land_spray.restart()
 	_land_skid.restart()
 
@@ -1465,7 +1620,10 @@ func _splat(point := Vector3.INF, normal := Vector3.ZERO, collider: Object = nul
 	_figure.visible = false
 	if normal == Vector3.ZERO:
 		_blob.visible = false
-		_splash.restart()
+		if crystal:
+			_shatter()
+		else:
+			_splash.restart()
 	elif is_enemy:
 		_exploded = true
 		_crash_burst(point, normal, collider)
@@ -1603,6 +1761,9 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	reset_physics_interpolation()
 	dead = false
 	_exploded = false
+	for shard in _shards:
+		shard.view.queue_free()
+	_shards.clear()
 	# Pulls itself back together out of a puddle
 	_melt = 1.0
 	_charging = false
@@ -1612,6 +1773,12 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	_wall_roll = 0.0
 	_puddled = true
 	_pool_size = 1.0
+	if crystal:
+		# (a Crystalien doesn't: it springs up out of the ground, tall and thin, and settles)
+		_melt = 0.0
+		_puddled = false
+		_pool_size = 0.0
+		_bounce_t = 0.0
 	speed = 0.0 # from a standstill: pumping hard
 	_dash_left = 0.0
 	dash_cooldown = 0.0

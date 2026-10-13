@@ -104,9 +104,17 @@ void sky() {
 	col += horizon * (exp(-s * 5.0) * 0.55 + exp(-s * 18.0) * 0.5);
 	// (out in space it's a plain small star, not the striped sun)
 	float size = sun_size * mix(1.0, 0.4, space);
-	if (s < size && space > 0.5) {
-		col = mix(col, mix(horizon, vec3(1.0, 0.97, 0.9), 0.8) * 2.2, 1.0 - smoothstep(size * 0.9, size, s));
-	} else if (s < sun_size && space < 0.5) {
+	if (space > 0.5) {
+		// Three suns over the moon: the big white one down the lane, a smaller amber one and a
+		// small blue-white one (the same three light the moon: moon.gdshader, ring_world.gd)
+		col = mix(col, vec3(1.0, 0.95, 0.88) * 2.4, 1.0 - smoothstep(size * 0.9, size, s));
+		float b = acos(clamp(dot(d, normalize(vec3(0.55, 0.22, -0.8))), -1.0, 1.0));
+		col += vec3(1.0, 0.62, 0.3) * (exp(-b * 9.0) * 0.4 + exp(-b * 30.0) * 0.5);
+		col = mix(col, vec3(1.0, 0.7, 0.4) * 2.2, 1.0 - smoothstep(size * 0.5, size * 0.56, b));
+		float c = acos(clamp(dot(d, normalize(vec3(-0.62, 0.42, -0.66))), -1.0, 1.0));
+		col += vec3(0.55, 0.75, 1.0) * (exp(-c * 12.0) * 0.35 + exp(-c * 40.0) * 0.5);
+		col = mix(col, vec3(0.7, 0.85, 1.0) * 2.4, 1.0 - smoothstep(size * 0.3, size * 0.35, c));
+	} else if (s < sun_size) {
 		float v = clamp((y - (sd.y - sun_size)) / (2.0 * sun_size), 0.0, 1.0); // 0 at its foot, 1 at its top
 		vec3 disc = mix(horizon * 1.4, vec3(1.0, 0.9, 0.55) * 1.8, v);
 		float band = step(fract(v * 9.0), mix(0.55, 0.05, v)) * step(v, 0.55);

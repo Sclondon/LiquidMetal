@@ -12,6 +12,8 @@ signal failed
 const RADIUS := 70.0
 const MODES := ["open", "blocks", "movers", "pit"]
 const PIT_RADIUS := 14.0
+const LAYOUT_TIME := 45.0 # seconds between changes of layout while a round's on
+const WARN_TIME := 3.5 # how long the games are told before one comes in
 const START_MASS := 10
 const SAFE := 2.5
 const DROPS := 110
@@ -35,6 +37,10 @@ var _blocks: Array = []
 var _movers: Array = []
 var _pit := 0.0
 var _mode := ""
+var _next_layout := 0.0
+var _layout_from := 0.0 # seconds into the round the layout came in (its sliding blocks count from it)
+## How often the layout changes in a round, seconds (a test may shorten it)
+var layout_time := LAYOUT_TIME
 var _next_drop := 1
 var _phase := "play"
 var _until := 0.0
@@ -47,6 +53,7 @@ var _rng := RandomNumberGenerator.new()
 func open(player_name: String) -> void:
 	_rng.randomize()
 	_until = round_time
+	_next_layout = layout_time
 	_lay_out(first_mode if first_mode != "" else MODES[_rng.randi() % MODES.size()])
 	_lay_drops()
 	_add_ent(player_name, false)
@@ -85,6 +92,12 @@ func send(m: Dictionary) -> void:
 			var ent: Dictionary = _ents.get(int(m.e), {})
 			if ent.is_empty() or not ent.alive or _phase != "play":
 				return
+			# (into the wall somebody's dash left: theirs the credit)
+			var by: Dictionary = _ents.get(int(m.get("by", 0)), {}) if m.get("how") == "trail" else {}
+			if not by.is_empty() and by.alive and by.id != ent.id:
+				if _clock >= ent.safe_until:
+					_kill(ent, by, "trail")
+				return
 			_kill(ent, {}, "pit" if m.get("how") == "pit" else "wall")
 		"spawn":
 			var ent: Dictionary = _ents.get(int(m.e), {})
@@ -110,6 +123,20 @@ func _process(delta: float) -> void:
 	_tick += delta
 	if _tick >= 0.25:
 		_tick = 0.0
+		if _phase == "play" and _clock >= _next_layout and _until - _clock > 20.0:
+			# The arena changes under them: a warning now, the new layout in a moment
+			_next_layout = _clock + layout_time
+			var modes := MODES.filter(func(mode): return mode != _mode)
+			_lay_out(modes[_rng.randi() % modes.size()])
+			_layout_from = _clock - (_until - round_time) + WARN_TIME
+			for id in _drops.keys():
+				if _in_block(_drops[id][0], _drops[id][1]):
+					_drops.erase(id) # (a stone or the pit is coming where it lay)
+			_ring_pit_drops()
+			var change := { t = "layout", drops = _drop_list() }
+			change.merge(_layout())
+			change["in"] = WARN_TIME * 1000.0
+			_out.append(change)
 		if _phase == "play":
 			if _clock >= _until:
 				_phase = "over"
@@ -130,6 +157,8 @@ func _process(delta: float) -> void:
 			# A new round: everyone back to the start, and the arena laid out another way
 			_phase = "play"
 			_until = _clock + round_time
+			_next_layout = _clock + layout_time
+			_layout_from = 0.0
 			var others := MODES.filter(func(mode): return mode != _mode)
 			_lay_out(others[_rng.randi() % others.size()])
 			_lay_drops()
@@ -199,7 +228,7 @@ func _lay_out(mode: String) -> void:
 
 
 func _layout() -> Dictionary:
-	return { mode = _mode, radius = RADIUS, blocks = _blocks, movers = _movers, pit = _pit }
+	return { mode = _mode, radius = RADIUS, blocks = _blocks, movers = _movers, pit = _pit, t0 = _layout_from * 1000.0 }
 
 
 ## A round's drops: scattered, and round a pit a ring of fat ones on its lip
@@ -207,6 +236,10 @@ func _lay_drops() -> void:
 	_drops.clear()
 	for i in DROPS:
 		_scatter_drop()
+	_ring_pit_drops()
+
+
+func _ring_pit_drops() -> void:
 	if _pit > 0.0:
 		for i in 12:
 			var at := Vector2.from_angle(i / 12.0 * TAU) * (_pit + 2.6)

@@ -1,8 +1,11 @@
 extends Node3D
 ## The Crystaliens' colosseum on their black sand moon: a round floor of black sand inside a tall
 ## wall (for running along), banked stands behind it full of Crystaliens watching, and a ring of
-## great crystals round the top that light it. arena.gd builds one and asks it for the floor each
-## round (flat, or with a pit in the middle); `cheer()` gets the crowd on its feet.
+## the Crystaliens' palace of iron and glass round the top of it, with their towers beyond
+## (palace.gd). arena.gd builds one and asks it for the floor whenever the layout changes (flat, or
+## with a pit in the middle; `warn_pit` marks where one is about to open). The crowd watches:
+## `cheer()` gets it on its feet, `wave(at)` sends a wave round from where something happened,
+## `flash(colour)` lights it up in somebody's colour, `gasp()` has it shrink in its seats.
 ## The sand is the shared sand component (GameCommon godot/sand: sand_ground.gd), black, drawn
 ## as a disc; it takes the runners' furrows (`ground.trail`). What they stand on is this script's.
 
@@ -23,6 +26,10 @@ var _floor: Node3D
 var ground: SandGround
 var _crowd_material := ShaderMaterial.new()
 var _cheer := 0.0
+var _wave := 2.0 # how far round the wave has got (0 .. 0.5; past that: none)
+var _flash := 0.0
+var _hush := 0.0
+var _warning: Node3D
 var _rng := RandomNumberGenerator.new()
 
 
@@ -32,14 +39,25 @@ func _ready() -> void:
 	_build_wall()
 	_build_stands()
 	_build_crowd()
-	_build_spires()
+	var palace := preload("res://scripts/palace.gd").new()
+	palace.out = radius + 0.8 + TIERS * TIER_DEPTH + 3.0
+	palace.foot = WALL_HEIGHT + TIERS * TIER_RISE + 5.0
+	add_child(palace)
 	set_floor(0.0)
 
 
 func _process(delta: float) -> void:
-	if _cheer > 0.0:
-		_cheer = maxf(_cheer - delta * 0.7, 0.0)
-		_crowd_material.set_shader_parameter("cheer", _cheer)
+	_cheer = maxf(_cheer - delta * 0.55, 0.0)
+	_flash = maxf(_flash - delta * 0.8, 0.0)
+	_hush = maxf(_hush - delta * 0.6, 0.0)
+	if _wave <= 0.5:
+		_wave += delta * 0.3 # (round to the far side in a second and a half or so)
+	_crowd_material.set_shader_parameter("cheer", _cheer)
+	_crowd_material.set_shader_parameter("flash_amount", _flash)
+	_crowd_material.set_shader_parameter("hush", _hush)
+	_crowd_material.set_shader_parameter("wave_reach", _wave)
+	if _warning:
+		_warning.visible = fmod(Time.get_ticks_msec() * 0.001, 0.4) < 0.26
 
 
 ## The crowd jumps up (someone's been burst, a round's been won)
@@ -47,8 +65,45 @@ func cheer(amount := 1.0) -> void:
 	_cheer = maxf(_cheer, amount)
 
 
+## A wave round the stands, both ways from the seats nearest a place on the sand
+func wave(at: Vector3) -> void:
+	_crowd_material.set_shader_parameter("wave_from", fposmod(atan2(at.z, at.x) / TAU, 1.0))
+	_wave = 0.0
+
+
+## The whole crowd lit a colour for a moment (whoever's just burst somebody: theirs)
+func flash(color: Color) -> void:
+	_crowd_material.set_shader_parameter("flash", color)
+	_flash = 1.0
+
+
+## They shrink down in their seats (somebody's gone down the pit)
+func gasp() -> void:
+	_hush = 1.0
+	_cheer = 0.0
+
+
+## Marks where a pit is about to open: a ring flashing on the sand
+func warn_pit(pit: float) -> void:
+	if _warning:
+		_warning.queue_free()
+		_warning = null
+	if pit <= 0.0:
+		return
+	var ring := MeshInstance3D.new()
+	ring.mesh = _ring_mesh(pit - 0.6, pit + 0.4)
+	ring.position.y = 0.12
+	var bright := StandardMaterial3D.new()
+	bright.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bright.albedo_color = Color(1.0, 0.45, 0.9)
+	ring.material_override = bright
+	add_child(ring)
+	_warning = ring
+
+
 ## The floor: black sand out to the wall, with a round pit in the middle if `pit` (its radius) > 0
 func set_floor(pit: float) -> void:
+	warn_pit(0.0)
 	if _floor:
 		_floor.free()
 	_floor = Node3D.new()
@@ -92,8 +147,8 @@ func _build_sand() -> void:
 	add_child(ground)
 	ground.build()
 	var sand := ground.material()
-	sand.set_shader_parameter(&"sparkle", 3.0)
-	sand.set_shader_parameter(&"sparkle_aim", 0.965)
+	sand.set_shader_parameter(&"sparkle", 1.1) # (a glint here and there, not a field of them)
+	sand.set_shader_parameter(&"sparkle_aim", 0.988)
 	sand.set_shader_parameter(&"glint", Color(0.75, 0.6, 1.0))
 
 
@@ -283,30 +338,11 @@ func _build_crowd() -> void:
 	for i in places.size():
 		crowd.set_instance_transform(i, places[i])
 		crowd.set_instance_color(i, Crystal.COLORS[_rng.randi() % Crystal.COLORS.size()].lerp(Color.WHITE, _rng.randf() * 0.2))
-		crowd.set_instance_custom_data(i, Color(_rng.randf(), _rng.randf(), 0.0, 0.0))
+		# (its own timing, and where round the arena it sits: the wave goes by that)
+		crowd.set_instance_custom_data(i, Color(_rng.randf(), _rng.randf(), fposmod(atan2(places[i].origin.z, places[i].origin.x) / TAU, 1.0), 0.0))
 	_crowd_material.shader = preload("res://shaders/crowd.gdshader")
 	var view := MultiMeshInstance3D.new()
 	view.multimesh = crowd
 	view.material_override = _crowd_material
 	view.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(view)
-
-
-## Great crystals standing round the top of the stands, lit from inside
-func _build_spires() -> void:
-	var out := radius + 0.8 + TIERS * TIER_DEPTH + 3.0
-	var up := WALL_HEIGHT + TIERS * TIER_RISE + 5.0
-	var count := 24
-	for k in count:
-		var angle := k * TAU / count
-		var height := 16.0 if k % 2 == 0 else 10.0
-		var spire := MeshInstance3D.new()
-		spire.mesh = Crystal.shard(1.6 if k % 2 == 0 else 1.1, height, 0.5)
-		spire.position = Vector3(cos(angle) * out, up + height * 0.35, sin(angle) * out)
-		spire.rotation = Vector3(_rng.randf_range(-0.12, 0.12), _rng.randf() * TAU, _rng.randf_range(-0.12, 0.12))
-		var material := ShaderMaterial.new()
-		material.shader = preload("res://shaders/crystal.gdshader")
-		material.set_shader_parameter("horizon", Crystal.COLORS[k % Crystal.COLORS.size()])
-		spire.material_override = material
-		spire.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(spire)

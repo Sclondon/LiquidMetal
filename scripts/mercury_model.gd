@@ -64,11 +64,12 @@ const SLASH_TIME := 0.18 # seconds for the blade to sweep from over the shoulder
 var _stretch: Array[float] = []
 var _arm_length := 1.0 # an arm blade's length in the model (from its mesh)
 # The slash's trail: a thin fading arc behind each slashing blade, along its outer third
-const TRAIL_LIFE := 0.16
+const TRAIL_LIFE := 0.5
 var _trail_points := {} # "L"/"R" -> [{ inner, outer, age }]
 var _trail_mesh := ImmediateMesh.new()
 var _trail_view := MeshInstance3D.new()
 var _trail_material := StandardMaterial3D.new()
+var _trail_liquid: ShaderMaterial # Mercury's: the slash drawn in liquid metal (a Crystalien's is a streak of light)
 # The tube muscles: [from part, point on it, to part, point on it, radius, how many in the bundle,
 # how far apart]. Points are where on each part's mesh they attach, as Blender has them (x right,
 # y ahead, z up, from the part's own joint); "_S": once for each side (S = -1 left, +1 right).
@@ -89,6 +90,9 @@ var _turned: Array[Vector3] = [] # per part: its own extra turn (euler), kept he
 var trail_color := Color(0.75, 0.88, 1.0)
 ## Something nearby to look at (the player picks it; INF: nothing)
 var look_point := Vector3.INF
+## 0..1: his head tipped back, looking up (the story's last shot)
+var chin_up := 0.0
+var _eye_material: StandardMaterial3D
 var _look_yaw := 0.0
 ## 0..1: the inside hand reaching down to the floor on a sharp turn (the player sets it)
 var turn_support := 0.0
@@ -121,6 +125,7 @@ func _ready() -> void:
 	var eye_material := StandardMaterial3D.new()
 	eye_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	eye_material.albedo_color = Color(1.0, 0.1, 0.08)
+	_eye_material = eye_material
 	_ball_material.shader = material.shader
 	_ball_material.set_shader_parameter("agitation", 1.0) # balls of liquid: always wobbling
 	var ball_mesh := SphereMesh.new()
@@ -253,6 +258,11 @@ func arm_mesh(side: String) -> MeshInstance3D:
 func hand(side := "") -> Vector3:
 	var arm: Node3D = _hands.get(side if side != "" else land_side)
 	return arm.global_transform * _hand_tip if arm else global_position
+
+
+## How hard his eye burns: 0 its usual red, 1 white-hot (it blooms)
+func set_eye_glow(amount: float) -> void:
+	_eye_material.albedo_color = Color(1.0, 0.1, 0.08).lerp(Color(4.0, 1.6, 1.2), amount)
 
 
 ## Something just joined this part (a droplet back, the balls setting): it ripples
@@ -446,7 +456,7 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			var local := _model.global_basis.inverse() * (look_point - _head_jiggle.global_position)
 			want = clampf(atan2(-local.x, -local.z), -1.0, 1.0)
 		_look_yaw = lerpf(_look_yaw, want, 1.0 - exp(-_delta * 5.0))
-		_turned[_jiggles.find(_head_jiggle)] = Vector3(0.0, -steer * 0.7 + stride * 0.16 + _look_yaw, 0.0)
+		_turned[_jiggles.find(_head_jiggle)] = Vector3(chin_up * 0.6, -steer * 0.7 + stride * 0.16 + _look_yaw, 0.0)
 	# Slow (getting up to speed): the arms pump hard, each against its leg; gone by full speed
 	var pump := clampf(maxf(effort, (10.0 - speed) / 6.0), 0.0, 1.0) * (1.0 if pose == "run" else 0.0)
 	_arm_pump = lerpf(_arm_pump, pump, 1.0 - exp(-_delta * 6.0))
@@ -654,18 +664,57 @@ func _draw_trail(delta: float) -> void:
 		if _punch > 0.0 and _slash < 1.0 and _punching(side):
 			var arm: MeshInstance3D = _hands[side]
 			var tip: Vector3 = arm.global_transform * _hand_tip
-			var root: Vector3 = arm.global_transform * (_hand_tip * 0.68)
+			# (Mercury's is a broad sheet of metal off most of the blade and out past its point; a
+			# Crystalien's a thin streak of light off the end of it)
+			var root: Vector3 = arm.global_transform * (_hand_tip * (0.68 if crystal else 0.2))
+			if not crystal:
+				tip = arm.global_transform * (_hand_tip * 1.9)
 			points.append({ inner = root, outer = tip, age = 0.0 })
 	_trail_mesh.clear_surfaces()
 	for side in _trail_points:
 		var points: Array = _trail_points[side]
 		if points.size() < 2:
 			continue
+		if crystal:
+			_trail_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, _trail_material)
+			for p in points:
+				var fade: float = 1.0 - float(p.age) / TRAIL_LIFE
+				_trail_mesh.surface_set_color(Color(1.0, 1.0, 1.0, 0.0))
+				_trail_mesh.surface_add_vertex(p.inner)
+				_trail_mesh.surface_set_color(Color(1.0, 1.0, 1.0, fade * fade * 0.75))
+				_trail_mesh.surface_add_vertex(p.outer)
+			_trail_mesh.surface_end()
+			continue
+		# Liquid metal: a sheet hanging in the air where the blade went, drawing in toward its
+		# outer edge as it ages until it's a thread, then gone
+		if _trail_liquid == null:
+			_trail_liquid = (material as ShaderMaterial).duplicate()
+			_trail_liquid.set_shader_parameter("agitation", 1.0)
+			_trail_liquid.set_shader_parameter("ripple", 1.6)
+			_trail_liquid.render_priority = 1
+		_trail_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, _trail_liquid)
+		for k in points.size():
+			var p: Dictionary = points[k]
+			var fade: float = 1.0 - float(p.age) / TRAIL_LIFE
+			var next: Dictionary = points[mini(k + 1, points.size() - 1)]
+			var last: Dictionary = points[maxi(k - 1, 0)]
+			var along: Vector3 = (next.outer as Vector3) - (last.outer as Vector3)
+			var face := along.cross((p.outer as Vector3) - (p.inner as Vector3)).normalized()
+			if face == Vector3.ZERO:
+				face = Vector3.UP
+			var thin := fade * fade
+			_trail_mesh.surface_set_normal(face)
+			_trail_mesh.surface_add_vertex((p.outer as Vector3).lerp(p.inner, thin))
+			_trail_mesh.surface_set_normal(face)
+			_trail_mesh.surface_add_vertex(p.outer)
+		_trail_mesh.surface_end()
+		# ...and its edge alight, so it's seen against anything
+		_trail_material.albedo_color = Color(0.85, 0.93, 1.0)
 		_trail_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, _trail_material)
 		for p in points:
 			var fade: float = 1.0 - float(p.age) / TRAIL_LIFE
 			_trail_mesh.surface_set_color(Color(1.0, 1.0, 1.0, 0.0))
-			_trail_mesh.surface_add_vertex(p.inner)
-			_trail_mesh.surface_set_color(Color(1.0, 1.0, 1.0, fade * fade * 0.75))
+			_trail_mesh.surface_add_vertex((p.outer as Vector3).lerp(p.inner, 0.45 * fade))
+			_trail_mesh.surface_set_color(Color(1.0, 1.0, 1.0, fade))
 			_trail_mesh.surface_add_vertex(p.outer)
 		_trail_mesh.surface_end()

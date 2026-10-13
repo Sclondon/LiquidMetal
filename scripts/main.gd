@@ -17,6 +17,8 @@ const Difficulty := preload("res://scripts/difficulty.gd")
 const Viewer := preload("res://scripts/viewer.gd")
 const Flags := preload("res://scripts/flags.gd")
 const SkyShow := preload("res://scripts/sky_show.gd")
+const Cinematic := preload("res://scripts/cinematic.gd")
+const Colosseum := preload("res://scripts/colosseum.gd")
 
 const BEST_FILE := "user://bests.cfg"
 const ARENA_SPEED := 13.0
@@ -37,6 +39,8 @@ const ENDLESS_FAST := 3000.0
 @export var arena_round := 0.0
 ## The arena's first layout when the room's run here ("": any): "open" / "blocks" / "movers" / "pit"
 @export var arena_mode := ""
+## How often the arena's layout changes in a round when the room's run here, seconds (0: the usual)
+@export var arena_layout_time := 0.0
 var mode := ""
 
 var area: Node3D
@@ -55,6 +59,8 @@ var _test_enemies := true # the test area's enemies (the TUNE panel switches the
 var _sky: ShaderMaterial # shaders/sky.gdshader
 var _sun: DirectionalLight3D
 var sky_show: MeshInstance3D # what moves in the sky: comets and the rest (sky_show.gd)
+var story: CanvasLayer # the story before the menu (cinematic.gd)
+var _story_seen := false # (saved: it plays by itself only the first time)
 var _environment: Environment
 
 
@@ -106,6 +112,12 @@ func _ready() -> void:
 	menu.test_area_chosen.connect(start_test)
 	menu.arena_chosen.connect(start_arena)
 	menu.viewer_chosen.connect(start_viewer)
+	menu.story_chosen.connect(start_story)
+	story = Cinematic.new()
+	story.cam = cam
+	story.player = player
+	story.finished.connect(_on_story_over)
+	add_child(story)
 	menu.menu_chosen.connect(show_menu)
 	menu.difficulty_chosen.connect(_on_difficulty)
 	menu.again_chosen.connect(restart)
@@ -132,17 +144,71 @@ func _ready() -> void:
 		"viewer":
 			start_viewer()
 		_:
-			show_menu()
+			# The first time it's ever opened (really opened: not by a test), the story first
+			if not _story_seen and get_tree().get_script() == null and not OS.has_feature("editor"):
+				start_story()
+			else:
+				show_menu()
+
+
+## The story: Mercury standing in the middle of the colosseum, the camera its to move
+## (cinematic.gd), then the title menu
+func start_story() -> void:
+	_leave_viewer()
+	mode = "story"
+	var stage := Node3D.new()
+	var colosseum := Colosseum.new()
+	stage.add_child(colosseum)
+	# Lit for it: a cold light on him from high in front, a warm one low behind to pick out his edge
+	for lamp in [[Vector3(-2.5, 5.0, 30.0), Color(0.7, 0.85, 1.0), 5.0], [Vector3(3.0, 1.2, 38.0), Color(1.0, 0.6, 0.35), 3.5], [Vector3(-3.5, 2.0, 36.5), Color(0.7, 0.4, 1.0), 2.5]]:
+		var light := OmniLight3D.new()
+		light.position = lamp[0]
+		light.light_color = lamp[1]
+		light.light_energy = lamp[2]
+		light.omni_range = 14.0
+		stage.add_child(light)
+	_use_course(stage)
+	menu.hide_all()
+	hud.visible = false
+	player.reset_drops()
+	colosseum.set_floor(14.0) # (the pit open in the middle; he stands clear of it)
+	player.place(Vector3(0.0, 0.0, 34.0), 0.0)
+	# Standing on the sand, breathing: held still with the brake on (his feet find the floor)
+	player.set_physics_process(true)
+	_input.set_process_input(false)
+	_input.set_process(false)
+	_input.turn = 0.0
+	_input.look = Vector2.ZERO
+	_input.brake = 1.0
+	cam.set_process(false)
+	cam.far = 700.0
+	sky_show.reach = 650.0
+	_environment.fog_density = 0.004
+	_set_sky({ top = Color(0.012, 0.008, 0.03), horizon = Color(0.55, 0.3, 1.0), fog = Color(0.1, 0.06, 0.18), space = 1.0, ring = 1.0 }, 0.0)
+	story.colosseum = colosseum
+	story.play(stage)
+
+
+func _on_story_over() -> void:
+	cam.set_process(true)
+	_input.brake = 0.0
+	_input.set_process(true)
+	cam.h_offset = 0.0
+	cam.v_offset = 0.0
+	if not _story_seen:
+		_story_seen = true
+		_save_bests()
+	show_menu()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Gamepad Start: back to the menu
-	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START and mode != "menu":
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START and mode != "menu" and mode != "story":
 		show_menu()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if not event.pressed or event.echo:
+	if not event.pressed or event.echo or mode == "story":
 		return
 	if event.physical_keycode == KEY_R and mode != "menu":
 		restart()
@@ -190,6 +256,7 @@ func start_arena() -> void:
 	course.player_name = Flags.value("name", _name)
 	course.round_time = arena_round
 	course.first_mode = arena_mode
+	course.layout_time = arena_layout_time
 	# (the tests start straight in: they play a room run here unless told a server)
 	if not Flags.all().has("offline"):
 		course.server = Flags.value("server", ARENA_SERVER if start_mode == "menu" else "")
@@ -266,7 +333,7 @@ func _set_test_enemies(on: bool) -> void:
 
 ## A freshly generated course, and back to the start of it
 func restart() -> void:
-	if mode == "viewer":
+	if mode == "viewer" or mode == "story":
 		return
 	if mode == "endless":
 		start_endless()
@@ -427,6 +494,7 @@ func _load_bests() -> void:
 	if file.load(BEST_FILE) != OK:
 		return
 	_name = str(file.get_value("settings", "name", _name))
+	_story_seen = bool(file.get_value("settings", "story_seen", false))
 	if file.has_section("best"):
 		for key in file.get_section_keys("best"):
 			_bests[key] = file.get_value("best", key, 0)
@@ -444,6 +512,7 @@ func _save_bests() -> void:
 		file.set_value("best", key, _bests[key])
 	file.set_value("settings", "difficulty", Difficulty.level)
 	file.set_value("settings", "name", _name)
+	file.set_value("settings", "story_seen", _story_seen)
 	file.save(BEST_FILE)
 
 
@@ -493,3 +562,12 @@ func _build_environment() -> void:
 	_sun.shadow_blur = 1.5
 	_sun.directional_shadow_max_distance = 70.0
 	add_child(_sun)
+	# The moon has three suns (sky.gdshader draws them): the other two, an amber one and a blue-white
+	# one, put a little of their own colour on things from where they stand. No shadows.
+	for other in [[Vector3(0.55, 0.22, -0.8), Color(1.0, 0.62, 0.3), 0.3], [Vector3(-0.62, 0.42, -0.66), Color(0.55, 0.75, 1.0), 0.22]]:
+		var sun := DirectionalLight3D.new()
+		sun.light_color = other[1]
+		sun.light_energy = other[2]
+		sun.light_specular = 0.8
+		add_child(sun)
+		sun.look_at(-(other[0] as Vector3)) # (a light shines along its -Z: away from where its sun is)

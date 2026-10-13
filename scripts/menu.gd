@@ -6,6 +6,7 @@ signal endless_chosen
 signal arena_chosen
 signal test_area_chosen
 signal viewer_chosen
+signal story_chosen
 signal menu_chosen
 signal again_chosen
 signal difficulty_chosen(level: int)
@@ -42,7 +43,7 @@ func _ready() -> void:
 		box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		box.grow_vertical = Control.GROW_DIRECTION_BOTH
 		box.alignment = BoxContainer.ALIGNMENT_CENTER
-		box.add_theme_constant_override("separation", 7) # (the title's five buttons, bests and tips fit 720 high)
+		box.add_theme_constant_override("separation", 5) # (the title's six buttons, bests and tips fit 720 high)
 		root.add_child(box)
 
 	var name_box := HBoxContainer.new()
@@ -60,6 +61,10 @@ func _ready() -> void:
 	_title.add_child(_button("ARENA", "online: fight the room for top mass", func(): arena_chosen.emit()))
 	_title.add_child(_button("TEST AREA", "play around", func(): test_area_chosen.emit()))
 	_title.add_child(_button("MODEL VIEWER", "get a good look at Mercury", func(): viewer_chosen.emit()))
+	var story := _button("STORY", "", func(): story_chosen.emit())
+	story.custom_minimum_size.y = 52
+	story.add_theme_font_size_override("font_size", 22)
+	_title.add_child(story)
 	# The difficulty: press to step through them (left / right on a gamepad or keys step back too)
 	_difficulty = _button("", "", func(): _step_difficulty(1))
 	_difficulty.custom_minimum_size.y = 84
