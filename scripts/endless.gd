@@ -40,6 +40,7 @@ const WALL_RUN_COLOR := Color(0.2, 1.0, 0.45) # the tall walls made for running 
 const BoostPad := preload("res://scripts/boost_pad.gd")
 const Runner := preload("res://scripts/player.gd")
 const AiInput := preload("res://scripts/ai_input.gd")
+const Difficulty := preload("res://scripts/difficulty.gd")
 
 ## Enemy runners on the lane (main turns them off for some tests)
 var with_enemies := true
@@ -107,7 +108,7 @@ func _physics_process(_delta: float) -> void:
 			var look: Dictionary = ZONES[zone % ZONES.size()]
 			create_tween().tween_property(_floor_material, "shader_parameter/line_color", look.lines, 2.0)
 			zone_changed.emit(zone, look)
-	if runner and with_enemies and distance() > 60.0 and enemies.size() < 2 and _rng.randf() < _delta * 0.2:
+	if runner and with_enemies and distance() > 60.0 and enemies.size() < int(Difficulty.tier().endless_enemies) and _rng.randf() < _delta * float(Difficulty.tier().endless_rate):
 		_spawn_enemy(runner.global_position.z + _rng.randf_range(22.0, 34.0)) # behind him: they chase
 	if runner == null:
 		return
@@ -181,7 +182,7 @@ func _build_chunk(from: float, to: float) -> void:
 			pad.position = Vector3(_rng.randf_range(-2.5, 2.5), 0.0, z - 5.0)
 			node.add_child(pad)
 		var hard := clampf((start_position.z - z) / HARD_AT, 0.0, 1.0)
-		var gap := lerpf(GAP_EASY, GAP_HARD, hard) * _rng.randf_range(0.9, 1.15)
+		var gap := lerpf(GAP_EASY, GAP_HARD, hard) * float(Difficulty.tier().gap_scale) * _rng.randf_range(0.9, 1.15)
 		if kind == "hurdle_pair":
 			gap += 10.0
 		gap += 4.0 + extra # (room for a boost to settle; and past a long one) # room to land off the second hurdle before the next thing
@@ -220,7 +221,7 @@ func _spawn_enemy(z: float) -> void:
 	ai.body = enemy
 	enemy.make_enemy()
 	enemy.place(Vector3(_rng.randf_range(-2.0, 2.0), 0.0, z), 0.0)
-	enemy.run_speed = runner.run_speed * 1.35 if runner else 9.0
+	enemy.run_speed = runner.run_speed * float(Difficulty.tier().chase) if runner else 9.0
 	enemy.speed = enemy.run_speed
 	enemies.append(enemy)
 

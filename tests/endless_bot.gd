@@ -17,6 +17,7 @@ func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
 	main.start_mode = "endless"
 	main.enemies = false
+	main.use_pads = false
 	root.add_child(main)
 
 
@@ -31,9 +32,9 @@ func _actions(obstacle: Dictionary, pace: float) -> Array:
 		"beam", "tunnel":
 			return [[z + 3.0 * pace, "duck"]]
 		"dodge_left", "dodge_both":
-			return [[z + 6.0 * pace, "left"], [z - 2.0, "right"]]
+			return [[z + 6.0 * pace, "left"], [z - 2.0, "centre"]]
 		"dodge_right":
-			return [[z + 6.0 * pace, "right"], [z - 2.0, "left"]]
+			return [[z + 6.0 * pace, "right"], [z - 2.0, "centre"]]
 		"hurdle_pair":
 			return [[z + obstacle.half + 4.5 * pace, "jump"], [z - obstacle.half + 4.5 * pace, "jump"]]
 	return []
@@ -41,6 +42,7 @@ func _actions(obstacle: Dictionary, pace: float) -> Array:
 
 func _process(_delta: float) -> bool:
 	var player: CharacterBody3D = main.player
+	player.input.set_process(false) # (the bot sets its turn axis itself)
 	if player.dead and not splatted:
 		splatted = true
 		print("ENDLESS SPLAT at %.0f m (speed %.1f) x=%.2f y=%.2f" % [main.area.distance(), player.run_speed, player.global_position.x, player.global_position.y])
@@ -78,6 +80,10 @@ func _process(_delta: float) -> bool:
 		if is_instance_valid(enemy) and enemy.dead and not seen.has(enemy):
 			seen[enemy] = true
 			blown += 1
+	# Steering back to the middle of the lane between moves (a dodge is a fixed 4.5 m, so without
+	# this it drifts off-centre and can't line up for the pillars): aimed a little toward the middle
+	var aim := clampf(player.global_position.x * 0.08, -0.15, 0.15) # (heading > 0 runs left, toward -x)
+	player.input.turn = clampf((player.heading - aim) * 4.0, -1.0, 1.0) if player._dodge_left <= 0.0 else 0.0
 	var pace: float = maxf(-player.velocity.z, player.run_speed) / 14.0 # (forward speed only: not a dodge's sideways)
 	var z := player.global_position.z
 	var plan: Array = main.area.lane_plan
@@ -90,7 +96,8 @@ func _process(_delta: float) -> bool:
 			done[key] = true
 			match actions[a][1]:
 				"centre":
-					if absf(player.global_position.x) > 1.0:
+					# (a dodge is a fixed 4.5 m: only when it ends up nearer the middle than it is now)
+					if absf(player.global_position.x) > 2.25:
 						player.input.dodge.emit(-signf(player.global_position.x))
 				"jump": player.input.jump.emit()
 				"duck": player.input.duck.emit()

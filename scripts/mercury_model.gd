@@ -1,8 +1,11 @@
 extends Node3D
 ## Mercury, the runner: the Blender model (models/mercury.glb, built by art/build_mercury.py
 ## after mercury.png) dressed in the liquid-metal shader. Every part floats free of the
-## others; the model's own animations run it ("run", a looping stride) and leap ("jump",
-## a held pose). Faces -Z.
+## others; the model's own animations run it ("run", a looping stride), leap ("jump", a held
+## pose), stand still ("idle", breathing) and hold the T ("tpose", the model viewer's). Faces -Z.
+## Bundles of chrome tubes, like muscles, join the floating parts at the neck, shoulders, hips and
+## knees: drawn fresh each frame between the parts' bouncing meshes, so they stretch and bend
+## with them.
 
 const MODEL_SCALE := 0.66 # the .glb is ~3.1 m to the horn tip; this makes it ~2 m
 # The stride: the legs always pump at the same quick rate; what changes with speed is how long
@@ -53,13 +56,35 @@ var _kick_left := 0.0 # a dash kicking off: one quick switch of legs
 var _kick_rate := 0.0 # how fast the kick's two steps play
 var _cock := 0.0
 var _punch := 0.0
-var _punch_with := "both" # "L", "R" or "both" (the clap)
-var _ext := 0.0 # how far out the punching arm is stretched, on a springy, overshooting spring
-var _ext_v := 0.0
+var _punch_with := "both" # "L", "R" or "both" (the X slash)
+var _slash := 1.0 # 0..1 through the slash's sweep (1: done, held at its end)
+const SLASH_TIME := 0.18 # seconds for the blade to sweep from over the shoulder to down across
 var _stretch: Array[float] = []
-var _reach_fix: Array[float] = []
 var _arm_length := 1.0 # an arm blade's length in the model (from its mesh)
+# The slash's trail: a thin fading arc behind each slashing blade, along its outer third
+const TRAIL_LIFE := 0.16
+var _trail_points := {} # "L"/"R" -> [{ inner, outer, age }]
+var _trail_mesh := ImmediateMesh.new()
+var _trail_view := MeshInstance3D.new()
+var _trail_material := StandardMaterial3D.new()
+# The tube muscles: [from part, point on it, to part, point on it, radius, how many in the bundle,
+# how far apart]. Points are where on each part's mesh they attach, as Blender has them (x right,
+# y ahead, z up, from the part's own joint); "_S": once for each side (S = -1 left, +1 right).
+const TUBES := [
+	["chest", Vector3(0.0, 0.0, 0.5), "head", Vector3(0.0, -0.03, -0.14), 0.058, 3, 0.07], # the neck
+	["chest", Vector3(0.21, 0.0, 0.38), "arm_S", Vector3(0.0, 0.0, -0.12), 0.048, 2, 0.07], # shoulders
+	["chest", Vector3(0.07, 0.0, 0.05), "thigh_S", Vector3(0.0, 0.0, -0.08), 0.058, 2, 0.07], # hips
+	["thigh_S", Vector3(0.0, 0.0, -0.56), "shin_S", Vector3(0.0, -0.02, 0.0), 0.045, 2, 0.08], # knees: into the ball joint
+]
+const TUBE_RINGS := 10 # along each tube
+const TUBE_SIDES := 7 # round it
+var _tube_links: Array = [] # [from mesh, from point, to mesh, to point, radius, count, spread] (Godot points)
+var _tube_mesh := ImmediateMesh.new()
+var _tube_view := MeshInstance3D.new()
+var _tubes_hidden := false
 var _turned: Array[Vector3] = [] # per part: its own extra turn (euler), kept here, not read back off a scaled basis # per part: drawn out along its length (the punching arm)
+## The slash trail's colour (enemies: red)
+var trail_color := Color(0.75, 0.88, 1.0)
 ## Something nearby to look at (the player picks it; INF: nothing)
 var look_point := Vector3.INF
 var _look_yaw := 0.0
@@ -80,6 +105,9 @@ var _last_root := Vector3.ZERO
 var _root_velocity := Vector3.ZERO
 var _anim: AnimationPlayer
 var _pose := "run"
+## A pose held whatever it's doing ("tpose" in the model viewer; "": none)
+var force_pose := ""
+const IDLE_BLEND := 0.3 # seconds to settle into standing (or set off from it)
 
 
 func _ready() -> void:
@@ -154,7 +182,6 @@ func _ready() -> void:
 		_deform.append(deform)
 		_splash.append(0.0)
 		_stretch.append(1.0)
-		_reach_fix.append(1.0)
 		_turned.append(Vector3.ZERO)
 		var ball := MeshInstance3D.new()
 		ball.mesh = ball_mesh
@@ -181,6 +208,12 @@ func _ready() -> void:
 		else: # the arms
 			_puddle_order.append(1.0)
 
+	# The shoulder pads go with their arm's bouncing (and slashing) blade
+	for part in _parts:
+		var name := String(part.name)
+		if name.begins_with("pad_") and _hands.has(name.right(1)):
+			part.reparent(_hands[name.right(1)], false)
+
 	# The eyes go with the head's bouncing mesh
 	for eye in _eyes:
 		var head: Node = eye.get_parent()
@@ -190,6 +223,7 @@ func _ready() -> void:
 
 	_anim = _model.find_child("AnimationPlayer", true, false)
 	_anim.get_animation("run").loop_mode = Animation.LOOP_LINEAR
+	_anim.get_animation("idle").loop_mode = Animation.LOOP_LINEAR
 	_anim.play("run")
 
 
@@ -239,14 +273,19 @@ func kick(time: float) -> void:
 	_kick_rate = (to_next + 0.6) / maxf(time - 0.04, 0.05)
 
 
-## The dash's punch: cock 0..1 the right arm drawn back, punch 0..1 thrown forward and stretched
+## The dash's slash: cock 0..1 the blade raised over the shoulder, punch 0..1 the slash on (it
+## sweeps through once as it comes on, held at its end through the dash, easing off after)
 func set_punch(cock: float, punch: float, with := "both") -> void:
+	if punch > 0.0 and _punch <= 0.0:
+		_slash = 0.0 # a new slash: from the top
+		for side in _trail_points:
+			_trail_points[side].clear()
 	_cock = cock
 	_punch = punch
 	_punch_with = with
 
 
-## Whether an arm ("L" / "R") is the one punching (both, for the clap)
+## Whether an arm ("L" / "R") is the one slashing (both, for the X)
 func _punching(side: String) -> bool:
 	return _punch_with == "both" or _punch_with == side
 
@@ -323,21 +362,26 @@ func _shape_balls() -> void:
 		ball.global_transform = Transform3D(shape * Basis.from_scale(squash * maxf(radius, 0.001)), spot)
 	for eye in _eyes:
 		eye.visible = not hide_eyes
+	_tubes_hidden = hide_eyes or jelly > 0.2 # (melting or gone to jelly: the parts come apart)
 
 
 ## Pose for this frame. speed: ground speed; effort: 0 at full speed .. 1 from a standstill (the
 ## legs pump hard getting up to speed and stretch out long once there); airborne + vertical
 ## speed; steer -1..1 (leaning into a turn, it glides rather than strides); sliding:
 ## dropping into a duck
-func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float, sliding := false, landing := false, effort := 0.0) -> void:
-	var pose := "slide" if sliding else ("jump" if airborne else ("land" if landing else "run"))
+## standing: stopped (braked to a halt, or not running at all): it stands, breathing
+func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float, steer: float, sliding := false, landing := false, effort := 0.0, standing := false) -> void:
+	var pose := "slide" if sliding else ("jump" if airborne else ("land" if landing else ("idle" if standing else "run")))
+	if force_pose != "":
+		pose = force_pose
+		steer = 0.0
 	if pose != _pose:
 		var from := _pose
 		_pose = pose
 		if pose == "land":
 			_anim.play("land_" + land_side, 0.04) # slammed into
 		else:
-			_anim.play(pose, BLEND)
+			_anim.play(pose, IDLE_BLEND if pose in ["idle", "tpose"] or from in ["idle", "tpose"] else BLEND)
 			if pose == "run" and from == "land":
 				# Out of the landing's step straight into the stride: on that leg's lunge
 				_anim.seek(0.6 if land_side == "R" else 0.0, true)
@@ -410,19 +454,11 @@ func animate(_delta: float, speed: float, airborne: bool, _vertical_speed: float
 			out = steer * 0.65 * turn_support
 		var turn := Vector3(swing * 1.0 * _arm_pump * (1.0 - turn_support) + 0.5 * absf(out), 0.0, out)
 		if (_cock > 0.0 or _punch > 0.0) and _punching(side):
-			# Charging: both arms spread wide and swept back behind him (further the longer it's held);
-			# the launch claps them together out in front (aimed dead ahead in _bounce)
-			var out_sign := 1.0 if side == "R" else -1.0
-			var wind := _cock - 1.0 if _cock > 1.0 else 0.0
-			var cocked := Vector3(-1.3 - wind * 2.2, 0.0, out_sign * (1.0 + wind * 0.9))
-			var thrown := Vector3(2.55, 0.0, 0.0)
-			turn = turn.lerp(thrown, _punch) # (the wind-up is aimed in _bounce)
+			turn = Vector3.ZERO # (the wind-up and the slash are aimed in _bounce)
 		var index := _jiggles.find(arm)
 		if index >= 0:
 			_turned[index] = turn
-		if index >= 0:
-			# Punching, the arm draws out long and thin, sagging a little, like a Dali clock
-			_stretch[index] = 1.0 # (the punch's stretch is worked out in _bounce)
+			_stretch[index] = 1.0
 	_bounce(_delta)
 
 
@@ -430,11 +466,8 @@ func _bounce(delta: float) -> void:
 	if delta <= 0.0:
 		return
 	delta = minf(delta, 1.0 / 30.0) # a long frame would throw the springs out
-	# The punching arm's stretch: snapping out past full length and wobbling back, like elastic
-	var step := delta / 4.0
-	for k in 4:
-		_ext_v += ((_punch - _ext) * 260.0 - _ext_v * 7.0) * step
-		_ext += _ext_v * step
+	if _punch > 0.0 and _slash < 1.0:
+		_slash = minf(_slash + delta / SLASH_TIME, 1.0)
 	_clock += delta
 	var root := global_position
 	if _springs_ready:
@@ -476,7 +509,7 @@ func _bounce(delta: float) -> void:
 		_ball_shape[i] = Basis.looking_at(along, up) * Basis.from_scale(Vector3(1.0 - pull * 0.35, 1.0 - pull * 0.35, 1.0 + pull))
 		# Into the part's own space (its scale included), so the mesh sits where the spring is
 		var local := part.global_basis.inverse() * offset
-		_jiggles[i].position = local * (1.0 - _punch if _hands.values().has(_jiggles[i]) else 1.0) # (the clap: locked on target)
+		_jiggles[i].position = local * (1.0 - _punch if _hands.values().has(_jiggles[i]) else 1.0) # (slashing: the blade held firm to its swing)
 		var shape := Vector3.ONE
 		if _deform[i] > 0.0:
 			# Legs: stretched when the spring hangs below the joint's path, squashed above it
@@ -491,47 +524,144 @@ func _bounce(delta: float) -> void:
 			var thin := 1.0 / sqrt(_stretch[i])
 			shape *= Vector3(thin, _stretch[i], thin)
 		var turned := Basis.from_euler(_turned[i])
-		if _punch > 0.0 and _hands.values().has(_jiggles[i]) and _punching(_hands.find_key(_jiggles[i])):
-			# The punch: aimed dead ahead, whatever the body's doing (the blade hangs along -y)
-			var ahead: Vector3 = (get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z
-			# Both hands meet at one point out ahead: each arm aimed at it, and stretched to reach it
-			var middle := Vector3.ZERO
-			for arm in _hands.values():
-				middle += (arm as Node3D).get_parent().global_position
-			middle /= maxf(_hands.size(), 1)
-			var meet := middle + ahead.normalized() * 3.0
-			if _punch_with != "both":
-				meet = _parts[i].global_position + ahead.normalized() * 3.4
-			var to_meet := meet - _parts[i].global_position
-			var y := -to_meet.normalized()
-			# (corrected each frame by how far the tip actually got: it converges onto the point)
-			var tip_now: Vector3 = _jiggles[i].global_transform * _hand_tip
-			var got := (tip_now - _parts[i].global_position).length()
-			if got > 0.05 and _punch > 0.95 and absf(_ext_v) < 0.5:
-				_reach_fix[i] = clampf(_reach_fix[i] * to_meet.length() / got, 0.3, 4.0)
-			var arm_reach := to_meet.length() / maxf(_arm_length * global_basis.get_scale().x, 0.01) * _reach_fix[i]
-			var thin := 1.0 / sqrt(maxf(lerpf(1.0, arm_reach, _ext), 0.3))
-			shape = shape / Vector3(1.0 / sqrt(_stretch[i]), _stretch[i], 1.0 / sqrt(_stretch[i])) * Vector3(thin, maxf(lerpf(1.0, arm_reach, _ext), 0.3), thin)
-			var x := y.cross(Vector3.UP).normalized()
-			var aimed := Basis(x, y, x.cross(y))
-			var aim_local := (_parts[i].global_basis.orthonormalized().inverse() * aimed).orthonormalized()
-			turned = Basis(Quaternion(turned.orthonormalized()).slerp(Quaternion(aim_local), _punch))
-		if _cock > 0.0 and _punch < 1.0 and _hands.values().has(_jiggles[i]) and _punching(_hands.find_key(_jiggles[i])):
-			# Winding up: both arms swept back behind him, a little out to the sides at first, then
-			# drawn further and further back and up the longer it's held
-			var fwd: Vector3 = (get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z
-			var centre := Vector3.ZERO
-			for arm in _hands.values():
-				centre += (arm as Node3D).get_parent().global_position
-			centre /= maxf(_hands.size(), 1)
-			var out := _parts[i].global_position - centre
-			out.y = 0.0
-			out = out.normalized()
+		var slashing_arm: bool = _hands.values().has(_jiggles[i]) and _punching(_hands.find_key(_jiggles[i]))
+		if slashing_arm and (_cock > 0.0 or _punch > 0.0):
+			# The slash: the blade raised high over its own shoulder (wound up: further back the longer
+			# it's held), then swept down and across the body to the far side. Left and right take
+			# turns; the X swings both at once, crossing in front.
+			var side: String = _hands.find_key(_jiggles[i])
+			var s := 1.0 if side == "R" else -1.0
+			var fwd: Vector3 = ((get_parent() as Node3D).call("forward") if get_parent().has_method("forward") else -global_basis.z)
+			fwd = fwd.normalized()
+			var right := fwd.cross(Vector3.UP).normalized()
 			var wound := clampf(_cock - 1.0, 0.0, 0.5) * 2.0
-			var dir := (-fwd.normalized() * (0.8 + 0.2 * wound) + out * (0.55 - 0.35 * wound) + Vector3.UP * (-0.25 + 0.75 * wound)).normalized()
-			var wy := -dir
-			var wx := wy.cross(Vector3.UP).normalized()
-			var wind_aim := (_parts[i].global_basis.orthonormalized().inverse() * Basis(wx, wy, wx.cross(wy))).orthonormalized()
-			turned = Basis(Quaternion(turned.orthonormalized()).slerp(Quaternion(wind_aim), minf(_cock, 1.0) * (1.0 - _punch)))
+			var raised := (Vector3.UP * 0.85 + right * s * 0.55 - fwd * (0.15 + 0.45 * wound)).normalized()
+			var across := (fwd * 0.75 - right * s * 0.65 - Vector3.UP * 0.55).normalized()
+			var sweep := 1.0 - pow(1.0 - _slash, 3.0) # (fast through the middle, slowing into the end)
+			var dir := raised.slerp(across, sweep) if _punch > 0.0 else raised
+			# (on through the whole sweep; once it's done, eased back to the run with the slash)
+			var weight := minf(_cock, 1.0) if _punch <= 0.0 else (1.0 if _slash < 1.0 else _punch)
+			var wy := -dir # (the blade hangs along -y)
+			var wx := wy.cross(fwd if absf(wy.dot(fwd)) < 0.95 else Vector3.UP).normalized()
+			var aim := (_parts[i].global_basis.orthonormalized().inverse() * Basis(wx, wy, wx.cross(wy))).orthonormalized()
+			turned = Basis(Quaternion(turned.orthonormalized()).slerp(Quaternion(aim), weight))
 		_jiggles[i].basis = turned * Basis.from_scale(shape) # (keeps the head's look)
 	_springs_ready = true
+	_draw_trail(delta)
+	_draw_tubes()
+
+
+## The tube muscles: each a bundle of chrome tubes from one part's mesh to the next, bowing out a
+## little and thickest in the middle, like a muscle
+func _draw_tubes() -> void:
+	if _tube_view.get_parent() == null:
+		var by_name := {}
+		for i in _parts.size():
+			by_name[String(_parts[i].name)] = _jiggles[i]
+		for tube in TUBES:
+			for s in ([-1.0, 1.0] if String(tube[2]).ends_with("_S") else [1.0]):
+				var from: String = String(tube[0]).replace("_S", "_L" if s < 0.0 else "_R")
+				var to: String = String(tube[2]).replace("_S", "_L" if s < 0.0 else "_R")
+				if not by_name.has(from) or not by_name.has(to):
+					continue
+				var a: Vector3 = tube[1]
+				var b: Vector3 = tube[3]
+				# (Blender's x, y, z to the mesh's own: x, z, -y; the side mirrors x)
+				_tube_links.append([by_name[from], Vector3(a.x * s, a.z, -a.y), by_name[to], Vector3(b.x * s, b.z, -b.y), tube[4], tube[5], tube[6]])
+		_tube_view.mesh = _tube_mesh
+		_tube_view.material_override = material
+		_tube_view.top_level = true
+		_tube_view.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+		add_child(_tube_view)
+	_tube_mesh.clear_surfaces()
+	_tube_view.visible = not _tubes_hidden
+	if _tubes_hidden or _tube_links.is_empty():
+		return
+	var scale_now := global_basis.get_scale().x * MODEL_SCALE
+	_tube_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for link in _tube_links:
+		var a: Vector3 = (link[0] as Node3D).global_transform * (link[1] as Vector3)
+		var b: Vector3 = (link[2] as Node3D).global_transform * (link[3] as Vector3)
+		var along := b - a
+		if along.length() < 0.01:
+			continue
+		var dir := along.normalized()
+		var u := dir.cross(Vector3.UP if absf(dir.y) < 0.95 else Vector3.RIGHT).normalized()
+		var v := dir.cross(u)
+		var count: int = link[5]
+		for k in count:
+			var angle := TAU * k / count + 0.6
+			var spread: Vector3 = (u * cos(angle) + v * sin(angle)) * float(link[6]) * scale_now
+			_tube(a + spread * 0.5, b + spread * 0.5, spread.normalized() * along.length() * 0.12, float(link[4]) * scale_now)
+	_tube_mesh.surface_end()
+
+
+## One tube: from a to b, bowed out by bow at its middle, radius r (narrower at the ends)
+func _tube(a: Vector3, b: Vector3, bow: Vector3, r: float) -> void:
+	var rings: Array = []
+	var frames: Array = []
+	for i in TUBE_RINGS + 1:
+		var t := float(i) / TUBE_RINGS
+		var at := a.lerp(b, t) + bow * 4.0 * t * (1.0 - t)
+		var tangent := (b - a) + bow * 4.0 * (1.0 - 2.0 * t)
+		tangent = tangent.normalized()
+		var side := tangent.cross(Vector3.UP if absf(tangent.y) < 0.95 else Vector3.RIGHT).normalized()
+		var up := tangent.cross(side)
+		var radius := r * (0.55 + 0.45 * sin(PI * t))
+		var ring: Array = []
+		var normals: Array = []
+		for j in TUBE_SIDES:
+			var angle := TAU * j / TUBE_SIDES
+			var n := side * cos(angle) + up * sin(angle)
+			ring.append(at + n * radius)
+			normals.append(n)
+		rings.append(ring)
+		frames.append(normals)
+	for i in TUBE_RINGS:
+		for j in TUBE_SIDES:
+			var n := (j + 1) % TUBE_SIDES
+			for c in [[i, j], [i + 1, j], [i + 1, n], [i, j], [i + 1, n], [i, n]]:
+				_tube_mesh.surface_set_normal(frames[c[0]][c[1]])
+				_tube_mesh.surface_add_vertex(rings[c[0]][c[1]])
+
+
+## The slash's trail: while a blade's sweeping, its path from partway up to the tip is laid down
+## as a ribbon that fades out behind it
+func _draw_trail(delta: float) -> void:
+	if _trail_view.get_parent() == null:
+		_trail_view.mesh = _trail_mesh
+		_trail_view.top_level = true
+		_trail_view.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_trail_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_trail_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_trail_material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		_trail_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_trail_material.vertex_color_use_as_albedo = true
+		add_child(_trail_view)
+	_trail_material.albedo_color = trail_color
+	for side in _hands:
+		if not _trail_points.has(side):
+			_trail_points[side] = []
+		var points: Array = _trail_points[side]
+		for p in points:
+			p.age += delta
+		while not points.is_empty() and points[0].age > TRAIL_LIFE:
+			points.pop_front()
+		if _punch > 0.0 and _slash < 1.0 and _punching(side):
+			var arm: MeshInstance3D = _hands[side]
+			var tip: Vector3 = arm.global_transform * _hand_tip
+			var root: Vector3 = arm.global_transform * (_hand_tip * 0.68)
+			points.append({ inner = root, outer = tip, age = 0.0 })
+	_trail_mesh.clear_surfaces()
+	for side in _trail_points:
+		var points: Array = _trail_points[side]
+		if points.size() < 2:
+			continue
+		_trail_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, _trail_material)
+		for p in points:
+			var fade: float = 1.0 - float(p.age) / TRAIL_LIFE
+			_trail_mesh.surface_set_color(Color(1.0, 1.0, 1.0, 0.0))
+			_trail_mesh.surface_add_vertex(p.inner)
+			_trail_mesh.surface_set_color(Color(1.0, 1.0, 1.0, fade * fade * 0.75))
+			_trail_mesh.surface_add_vertex(p.outer)
+		_trail_mesh.surface_end()

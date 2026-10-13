@@ -1,7 +1,8 @@
 extends CanvasLayer
-## The HUD: a stats panel top left (what the mode's about: metres, wave, drops, smashes), a banner
-## for zones and waves, the round DASH button, and a TUNE panel with sliders for the feel (speed,
-## turning, jump, camera) plus restart / menu.
+## The HUD: a stats panel top left (what the mode's about: metres, mass, drops, smashes), a banner
+## for zones and the arena's news, the arena's standings (top right) and a line of who burst whom,
+## the round DASH button, and a TUNE panel with sliders for the feel (speed, turning, jump, camera)
+## plus restart / menu. In the arena the feel sliders and restart are put away: it's a shared room.
 
 const UI := preload("res://scripts/ui_theme.gd")
 
@@ -10,6 +11,9 @@ var cam: Camera3D
 var restart: Callable # a new course, back at the start
 var to_menu: Callable # back to the title menu
 var n64: CanvasLayer # the N64 filter, switched in the TUNE panel
+var set_enemies: Callable # the test area's enemies on / off (the TUNE panel's switch)
+## The TUNE panel's enemies switch: only shown in the test area (main.gd)
+var enemies_switch := CheckButton.new()
 
 var _stats_box := PanelContainer.new()
 var _big := Label.new() # e.g. "1234 m" or "WAVE 3"
@@ -19,6 +23,11 @@ var _tune_button := Button.new()
 var _panel := PanelContainer.new()
 var _flash := ColorRect.new()
 var _dash := Button.new()
+var _board := PanelContainer.new() # the arena's standings
+var _board_rows := VBoxContainer.new()
+var _feed := Label.new()
+var _feed_tween: Tween
+var _solo_only: Array[Control] = [] # the TUNE panel's rows that don't belong in a shared room
 
 
 func _ready() -> void:
@@ -63,6 +72,25 @@ func _ready() -> void:
 	_tune_button.pressed.connect(func(): _panel.visible = not _panel.visible)
 	root.add_child(_tune_button)
 
+	# The arena's standings, under the TUNE button
+	_board.visible = false
+	_board.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_board.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 14)
+	_board.offset_top = 70
+	_board.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_board_rows.add_theme_constant_override("separation", 0)
+	_board.add_child(_board_rows)
+	root.add_child(_board)
+	# ...and who burst whom, under the stats
+	_feed.position = Vector2(18, 104)
+	_feed.add_theme_font_size_override("font_size", 18)
+	_feed.add_theme_color_override("font_color", UI.PINK)
+	_feed.add_theme_color_override("font_outline_color", Color(0.02, 0.01, 0.05))
+	_feed.add_theme_constant_override("outline_size", 6)
+	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_feed.modulate.a = 0.0
+	root.add_child(_feed)
+
 	# DASH, bottom right, under your right thumb; dim while it recharges
 	_dash.text = "DASH"
 	_dash.custom_minimum_size = Vector2(140, 140)
@@ -101,10 +129,13 @@ func _build_panel(root: Control) -> void:
 	_slider(rows, "Speed", 4.0, 34.0, 1.0, player.run_speed, func(v): player.run_speed = v)
 	_slider(rows, "Turn rate", 30.0, 240.0, 5.0, player.turn_rate, func(v): player.turn_rate = v)
 	_slider(rows, "Jump height", 0.8, 5.0, 0.1, player.jump_height, func(v): player.jump_height = v)
+	for row in rows.get_children():
+		_solo_only.append(row)
 	_slider(rows, "Camera distance", 3.0, 14.0, 0.5, cam.distance, func(v): cam.distance = v)
 	_slider(rows, "Camera height", 1.0, 8.0, 0.25, cam.height, func(v): cam.height = v)
 	var back := Button.new()
 	back.text = "Restart (new course)"
+	_solo_only.append(back)
 	back.pressed.connect(func():
 		_panel.visible = false
 		restart.call()
@@ -117,17 +148,15 @@ func _build_panel(root: Control) -> void:
 		to_menu.call()
 	)
 	rows.add_child(leave)
-	var mirror := CheckButton.new()
-	mirror.text = "Real reflections"
-	mirror.button_pressed = player.real_reflections
-	mirror.toggled.connect(func(on): player.set_real_reflections(on))
-	if player.can_reflect(): # not on the web build: it can't
-		rows.add_child(mirror)
 	var retro := CheckButton.new()
 	retro.text = "N64 filter"
 	retro.button_pressed = n64.visible
 	retro.toggled.connect(func(on): n64.visible = on)
 	rows.add_child(retro)
+	enemies_switch.text = "Enemies"
+	enemies_switch.button_pressed = true
+	enemies_switch.toggled.connect(func(on): set_enemies.call(on))
+	rows.add_child(enemies_switch)
 
 
 func _slider(rows: VBoxContainer, title: String, low: float, high: float, step: float, value: float, apply: Callable) -> void:
@@ -169,7 +198,60 @@ func set_stats(big: String, small: String) -> void:
 	_stats_box.visible = big != "" or small != ""
 
 
-## A big line across the middle that pops in and fades (a new zone, a new wave)
+## The arena: its standings up, and the TUNE panel's feel sliders and restart put away
+func set_arena(on: bool) -> void:
+	_board.visible = false
+	_feed.modulate.a = 0.0
+	for row in _solo_only:
+		row.visible = not on
+	if not on:
+		return
+	# (anything tuned in the test area doesn't come into the room)
+	player.turn_rate = 110.0
+	player.jump_height = 2.2
+
+
+## The arena's standings: rows of { name, mass, me }, most mass first; title: "ONLINE" or "BOTS"
+func set_board(rows: Array, title: String) -> void:
+	_board.visible = not _panel.visible
+	var count := mini(rows.size(), 8) + 1 # (the title, then a line each: place and name, mass at the right)
+	while _board_rows.get_child_count() < count:
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 18)
+		for side in 2:
+			var label := Label.new()
+			label.add_theme_font_size_override("font_size", 17)
+			line.add_child(label)
+		(line.get_child(0) as Label).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		(line.get_child(1) as Label).horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_board_rows.add_child(line)
+	for k in _board_rows.get_child_count():
+		var line: Control = _board_rows.get_child(k)
+		line.visible = k < count
+		if not line.visible:
+			continue
+		var mine: bool = k > 0 and rows[k - 1].me
+		var color: Color = UI.PINK if k == 0 else (UI.CYAN if mine else UI.CHROME)
+		var left: Label = line.get_child(0)
+		var right: Label = line.get_child(1)
+		left.text = title if k == 0 else "%d  %s" % [k, rows[k - 1].name]
+		right.text = "MASS" if k == 0 else str(rows[k - 1].mass)
+		left.add_theme_color_override("font_color", color)
+		right.add_theme_color_override("font_color", color)
+
+
+## A line of the arena's news under the stats, fading after a moment
+func feed(text: String) -> void:
+	_feed.text = text
+	if _feed_tween:
+		_feed_tween.kill()
+	_feed.modulate.a = 1.0
+	_feed_tween = create_tween()
+	_feed_tween.tween_interval(2.5)
+	_feed_tween.tween_property(_feed, "modulate:a", 0.0, 0.6)
+
+
+## A big line across the middle that pops in and fades (a new zone, the arena's news)
 func banner(text: String, sub := "") -> void:
 	_banner.text = text if sub == "" else "%s\n%s" % [text, sub]
 	_banner.pivot_offset = _banner.size * 0.5

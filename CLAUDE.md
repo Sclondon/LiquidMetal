@@ -8,27 +8,34 @@ README.md covers the controls, modes and tests for players.
 
 The whole scene is built in code. `scenes/main.tscn` is just `scripts/main.gd`.
 
-- `main.gd`: the modes (`start_endless`, `start_arena`, `start_test`, `show_menu`, `restart`), the score, the bests, and the sky per zone.
-  - Exported vars: `start_mode` ("menu" / "endless" / "arena" / "test"), `enemies`, `use_pads`.
-- `player.gd`: the runner (CharacterBody3D). It holds every move: turn, jump, double jump, flips, duck/slide/puddle, dodge, wall run, dash punches with charge, splat and rewind.
+- `main.gd`: the modes (`start_endless`, `start_arena`, `start_test`, `start_viewer`, `show_menu`, `restart`), the score, the bests (per difficulty), and the sky and key light per zone.
+  - Exported vars: `start_mode` ("menu" / "endless" / "arena" / "test" / "viewer"), `enemies`, `use_pads`.
+- `difficulty.gd`: the tiers (CHILL / EASY / NORMAL / HARD) as a table of numbers, a static `level` (picked on the menu, saved), `wave_size()` and `best_key()`. NORMAL is the old tuning; tests always play it.
+- `viewer.gd`: the model viewer. Mercury runs on the spot (pulled back every physics step) while it orbits the camera; its buttons fire the runner input's signals.
+- `player.gd`: the runner (CharacterBody3D). It holds every move: turn, jump, double jump, flips, duck/slide/puddle, dodge, wall run, brake, dash slashes with charge, splat and rewind. Landing keeps its speed. Real reflections (a live probe) are on for the player, off for enemies.
   - Signals: `splatted`, `smashed`, `dashed`, `boosted`, `drops_changed`.
   - **The player and the enemies use this same script.** Enemies call `make_enemy()` and sit on collision layer 2 with mask 1. The player's mask is 1|2.
 - Input nodes: `runner_input.gd` (touch, keys, gamepad) and `ai_input.gd` (enemies: chase, ray feelers, lane_plan).
-  - Both expose the same signals and API: `jump`, `duck`, `dodge(dir)`, `dash`, `turn`, `look`, `duck_held()`, `dash_held()`. Keep them in sync.
-- `mercury_model.gd`: Mercury in-game. It loads `models/mercury.glb`, applies the liquid-metal shader, and plays the NLA anims (`run`, `jump`, `slide`, `land_R`, `land_L`).
-  - Each part has a spring "jiggle" child.
-  - Stride/pump timing, world-space punch aim, and an elastic arm stretch (`_ext`).
+  - Both expose the same signals and API: `jump`, `duck`, `dodge(dir)`, `dash`, `turn`, `look`, `brake`, `duck_held()`, `dash_held()`. Keep them in sync.
+- `mercury_model.gd`: Mercury in-game. It loads `models/mercury.glb`, applies the liquid-metal shader, and plays the NLA anims (`run`, `jump`, `slide`, `land_R`, `land_L`, `idle`, `tpose`; `force_pose` holds one).
+  - Each part has a spring "jiggle" child. The shoulder pads (`pad_L/R`) and eyes are reparented onto the arm / head jiggles.
+  - Tube muscles (`TUBES`: neck, shoulders, hips, knees) are rebuilt every frame in an ImmediateMesh between the parts' jiggles (attach points in Blender coordinates), hidden when he goes to jelly or melts.
+  - Stride/pump timing, and the dash's slash aimed in world space (`_slash` sweeps once over `SLASH_TIME`; `PUNCHES` in player.gd: L, R, then the X with both), with a fading trail.
 - Courses:
   - `endless.gd`: chunks ahead, cleared behind, with zones every 500 m (the `ZONES` and `ZONE_KINDS` tables).
-  - `arena.gd`: a 90 m walled square. Wave n sends n+1 enemies, at most 6 at once.
+  - `arena.gd`: the online battle room (agar.io style): a 140 m walled square where everyone fights for the most mass. Drops add mass, a dash through another runner bursts it (so does running into one 1.3x smaller), a burst runner spills 60% of its mass as drops and comes back at 10. Rounds are 3 minutes. Bots fill the room to 6 runners.
+    - The room itself (mass, drops, who burst whom, the clock) is `arena_net.gd` (the site's server: `server/liquidMetal/arena.js` + `server/routes/liquidMetal.js` in scareathon-v3, at `/liquid-metal/ws`) or, when that can't be reached, `arena_room.gd` (the same rules run in the game, bots only). **The rules live in both `arena.js` and `arena_room.gd`: change them together.** The message list is at the top of `arena_net.gd`.
+    - Each game moves its own runner and sends its state 15 times a second (`player.gd` `net_state` / `net_apply`, 11 bytes). Other players' runners are puppets (`make_puppet`). The bots are real runners with `bot_input.gd` at the controls, run by whichever game the server names (`bots` message); the rest see them as puppets.
+    - In the room nobody collides with anybody (layer 2, mask 1): `arena.gd` works out hits and drop pickups by distance and claims them from the room; the first claim wins.
+    - `--server=<url>` / `?server=` points at another server, `--offline` / `?offline` skips it. Tests that start straight into the arena play the local room unless given `--server`.
   - `test_area.gd`: the playground.
   - Each course exposes `lane_plan` (read by the bots and the AI), `start_position` and `runner`.
 - Effects: `droplets.gd` (blobs that fly off and rejoin), `trail.gd` (foot tracks), `boost_pad.gd`, `follow_cam.gd`.
 - UI: `ui_theme.gd` (StyleBoxFlat glass/neon theme), `menu.gd` (title + game over), `hud.gd` (stats panel, banners, round DASH button, TUNE panel).
 - `shaders/`:
   - `liquid_metal`: chrome faked with a painted horizon. Params: collapse, ball_radius, splash, real_reflection.
-  - `puddles`: smooth-union SDF discs on a plane, with a clip rect.
-  - `obstacle` (Tron edges), `grid_floor`, `boost_pad`, `n64` (post filter).
+  - `puddles`: smooth-union SDF discs on a subdivided plane, lifted into a 3D bead by vertex displacement, with a clip rect. The player sets its colours for enemies (red).
+  - `sky` (custom sky: gradient, sun, skyline, stars; `sky_top` / `horizon` per zone), `grid_floor` (brushed plates, seams, rough), `obstacle` (Tron edges), `boost_pad`, `n64` (post filter).
 - `art/build_mercury.py`: Blender script → `art/mercury.blend` + `models/mercury.glb`.
 
 ## Commands
@@ -42,21 +49,25 @@ Run the headless tests from this folder with `--headless --path . -s res://tests
 | Test | What a pass looks like |
 | --- | --- |
 | `lane_bot` | 5 random lanes, 0 splats |
-| `endless_bot` | reaches ~2100 m / zone 5 |
+| `endless_bot` | reaches 2100 m / zone 5, no splats (it steers itself back to the lane's middle) |
 | `touch_test` | 6 PASS |
 | `pad_test` | 5 PASS |
 | `wallrun_test` | 2 PASS |
 | `chase_test` | PASS |
-| `arena_test` | 3 PASS |
+| `arena_test` | 7 PASS (the local room; run it with `--fixed-fps 60` so its 45 s round goes quickly) |
+| `tools/arena_net_test.sh <scareathon-v3>/server` | 9 PASS: two copies of the game in one room on a local server (`tools/dev_relay.mjs`; needs `npm ci` in that server folder) |
 
-- Screenshot scripts (`shots`, `model_shots`, `liquid_shots`, `slide_shots`, `crash_shots`, `wall_shots`, `enemy_shots`, `ui_shots`, `menu_shots`) need a window. Run them without `--headless` and pass `-- <out dir>`.
+- `touch_test` fails its two hold-to-turn checks under `--fixed-fps 60`; run it without.
+
+- Screenshot scripts (`shots`, `model_shots`, `liquid_shots`, `slide_shots`, `crash_shots`, `wall_shots`, `enemy_shots`, `ui_shots`, `menu_shots`, `slash_shots`, `idle_shots`, `arena_shots`) need a window. The viewer ones are the easiest close-ups of Mercury. Run them without `--headless` and pass `-- <out dir>`.
 - After changing a script, check that it parses by running a test. `--check-only` trips on autoloads/class names.
 
 Rebuild the character (Blender 4.3):
 
     "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe" -b --factory-startup --python art/build_mercury.py
 
-- The run is 36 frames with bezier cyclic curves. The lunges sit at 0.0 s (left leg) and 0.6 s (right leg).
+- The run is 36 frames with bezier cyclic curves. The lunges sit at 0.0 s (left leg) and 0.6 s (right leg). `idle` (72 frames) loops the same way.
+- The head (a helmet: the teardrop with its two spikes extruded out of its own surface, one smooth mesh) is the only smooth-shaded part; the eye is one V-slit mesh (`eye_V`). Each shin carries a smooth ball joint at the knee (`KNEE_BALL`). Chest, thighs, shins and shoulder pads use `add_armor` (chamfered, eight-facet plates with stepped lips); the arm blades and knee guards keep the plain `add_shard` blade look on purpose. After a rebuild, run `--headless --import` so Godot picks the new .glb up.
 - The glTF exporter drops a perfectly static action, so every track needs some motion.
 - Arm `ry = -s*angle` swings the arms outward.
 

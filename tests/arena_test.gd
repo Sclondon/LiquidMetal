@@ -1,20 +1,27 @@
 extends SceneTree
-## Headless check of arena mode: wave 1 sends two enemies, they close in on him; blow them up and
-## it's cleared, and wave 2 sends three. Run: godot --headless --path . -s res://tests/arena_test.gd
+## Headless check of the arena's battle room, run here with bots (arena_room.gd): he's let into a
+## laid-out room with five bots; running over a drop adds to his mass; the bots feed too; dashing
+## through a bot bursts it (mass to him, drops on the floor) and it comes back; a wall splats him
+## and he comes back small; the round ends on the clock and a new one starts.
+## Run: godot --headless --fixed-fps 60 --path . -s res://tests/arena_test.gd
 
 var main: Node
 var t := 0.0
+var total := 0.0
 var log := []
 var step := 0
-var first_gap := 0.0
-var started := {}
-var cleared := []
+var bot := {}
+var before := 0
+var floor_drops := 0
+var rounds := { over = 0, started = 0 }
+var wall_deaths := 0
 
 
 func _initialize() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
 	main.start_mode = "arena"
 	main.use_pads = false
+	main.arena_round = 45.0
 	root.add_child(main)
 
 
@@ -22,42 +29,91 @@ func _check(name: String, ok: bool) -> void:
 	log.append("%s %s" % ["PASS" if ok else "FAIL", name])
 
 
-func _alive() -> Array:
-	return main.area.enemies.filter(func(e): return is_instance_valid(e) and not e.dead)
-
-
-func _gap() -> float:
-	var best := INF
-	for e in _alive():
-		best = minf(best, e.global_position.distance_to(main.player.global_position))
-	return best
-
-
 func _process(delta: float) -> bool:
 	t += delta
+	total += delta
 	var p: CharacterBody3D = main.player
-	p.run_speed = 4.0 # slow, in the middle: the enemies come to him
-	if step == 0:
-		main.area.wave_started.connect(func(w): started[w] = true)
-		main.area.wave_cleared.connect(func(w): cleared.append(w))
-		step = 1
-	elif step == 1 and _alive().size() >= 2:
-		_check("wave 1 sends two enemies", started.has(1) and _alive().size() == 2)
-		first_gap = _gap()
-		step = 2
-		t = 0.0
-	elif step == 2 and t > 1.5:
-		_check("they close in on him (%.1f m -> %.1f m)" % [first_gap, _gap()], _gap() < first_gap - 3.0)
-		for e in _alive():
-			e.blow_up(Vector3.ZERO)
-		step = 3
-		t = 0.0
-	elif step == 3 and started.has(2) and _alive().size() >= 3:
-		_check("wave 1 cleared, wave 2 sends three", cleared.has(1) and _alive().size() == 3)
-		step = 4
-	if step == 4 or t > 15.0:
-		if step != 4:
-			log.append("FAIL stuck at step %d (alive %d, started %s, cleared %s, dead %s)" % [step, _alive().size(), started, cleared, p.dead])
+	var arena: Node = main.area
+	if step > 0 and step < 6:
+		p.run_speed = 0.0 # standing in the middle of nowhere, so the test decides what he touches
+	match step:
+		0:
+			if arena.me != 0:
+				arena.round_over.connect(func(_top): rounds.over += 1)
+				arena.round_started.connect(func(): rounds.started += 1)
+				arena.feed.connect(func(text: String):
+					if text.ends_with("hit a wall"):
+						wall_deaths += 1)
+				_check("in the room: %d runners, %d drops, %d blocks" % [arena.runners.size(), arena.drops.size(), arena._course.get_child_count()],
+					arena.runners.size() == 6 and arena.drops.size() == 110 and p.is_physics_processing() and not arena.online)
+				step = 1
+				t = 0.0
+		1:
+			# Onto a drop
+			if t > 0.2 and before == 0:
+				before = arena.my_mass()
+				var drop: Dictionary = arena.drops.values()[0]
+				p.global_position = Vector3(drop.x, 0.0, drop.z)
+			elif t > 0.8:
+				_check("a drop adds to his mass (%d -> %d)" % [before, arena.my_mass()], arena.my_mass() > before)
+				step = 2
+				t = 0.0
+		2:
+			if t > 6.0:
+				var fed := 0
+				for r in arena.runners.values():
+					if r.bot:
+						fed += r.mass - 10
+				_check("the bots go for drops (%d between them in 6 s)" % fed, fed >= 5)
+				for r in arena.runners.values():
+					if r.bot and r.alive and not r.body.dead:
+						bot = r
+				before = arena.my_mass()
+				floor_drops = arena.drops.size()
+				p.global_position = Vector3(0.0, 0.0, 0.0)
+				p.input.dash.emit()
+				step = 3
+				t = 0.0
+		3:
+			# A bot held right in front of him while he slashes
+			if bot.alive and t < 1.0:
+				bot.body.global_position = p.global_position + p.forward() * 1.0
+			elif not bot.alive:
+				_check("dashing through a bot bursts it (his mass %d -> %d, %d drops spilled)" % [before, arena.my_mass(), arena.drops.size() - floor_drops],
+					arena.my_mass() > before and bot.body.dead and arena.smashes == 1 and arena.drops.size() > floor_drops)
+				step = 4
+				t = 0.0
+			elif t > 2.0:
+				_check("dashing through a bot bursts it", false)
+				step = 4
+		4:
+			if bot.alive and not bot.body.dead:
+				_check("the bot comes back small (%.1f s, mass %d)" % [t, bot.mass], bot.mass == 10)
+				p._splat()
+				step = 5
+				t = 0.0
+			elif t > 6.0:
+				_check("the bot comes back", false)
+				step = 5
+		5:
+			if t > 0.3 and t < 1.0 and (p.dead and arena.my_mass() == 0):
+				before = -1 # (seen down, with nothing)
+			if t > 1.0 and not p.dead and arena.runners[arena.me].alive:
+				_check("a wall splats him, he comes back small (%.1f s, mass %d)" % [t, arena.my_mass()], before == -1 and arena.my_mass() == 10)
+				step = 6
+				t = 0.0
+			elif t > 8.0:
+				_check("a wall splats him, he comes back small", false)
+				step = 6
+		6:
+			p.run_speed = 0.0
+			if rounds.started > 0:
+				_check("the round ends on the clock and a new one starts (%.0f s in; %d bot wall splats)" % [total, wall_deaths],
+					rounds.over == 1 and arena.phase == "play" and arena.my_mass() == 10 and arena.drops.size() == 110)
+				step = 7
+	if step == 7 or total > 90.0:
+		if step != 7:
+			log.append("FAIL stuck at step %d (me %d, phase %s, rounds %s)" % [step, arena.me, arena.phase, rounds])
 		for line in log:
 			print(line)
 		return true

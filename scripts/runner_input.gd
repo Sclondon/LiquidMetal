@@ -4,15 +4,20 @@ extends Node
 ##   swipe up = jump, swipe down = duck, swipe left/right = dodge,
 ##   tap and hold the left/right half of the screen = turn that way.
 ##   the DASH button = a burst of speed.
-## Keyboard: Space/W/Up jump, S/Down duck, Left/Right arrows dodge, A/D held turn, Shift/E dash.
+##   hold BOTH halves of the screen at once = brake (slow right down, to a stop).
+## Keyboard: Space/W/Up jump, S/Down duck, Left/Right arrows dodge, A/D held turn, Shift/E dash,
+## Q held brake.
 ## Gamepad: left stick turn, right stick look around (the camera), A / D-pad up jump, B / D-pad
-## down duck, X dash, LB / RB or D-pad left / right dodge. A stick only counts once it's been seen
-## resting in the middle (some devices report an axis stuck at full tilt).
+## down duck, X dash, LB / RB or D-pad left / right dodge, left trigger brake (how hard: how far
+## it's pulled). A stick only counts once it's been seen resting in the middle (some devices report
+## an axis stuck at full tilt).
 
 const STICK_DEADZONE := 0.2
 
 ## The right stick, -1..1 each way: the chase camera looks around with it
 var look := Vector2.ZERO
+## 0..1: how hard it's braking (1: slowing to a stop)
+var brake := 0.0
 
 ## False: gamepads ignored (the screenshot tests, on a machine with a controller plugged in)
 var use_pads := true
@@ -131,10 +136,13 @@ func _process(_delta: float) -> void:
 	var half := get_viewport().get_visible_rect().size.x * 0.5
 	var now := _now()
 	var held := 0.0
+	var sides := Vector2.ZERO # fingers held on the left half, on the right half
 	for touch in _touches.values():
 		if touch.used or now - touch.time < HOLD_DELAY:
 			continue
 		held += -1.0 if touch.pos.x < half else 1.0
+		sides += Vector2(1.0, 0.0) if touch.pos.x < half else Vector2(0.0, 1.0)
+	brake = 1.0 if (sides.x > 0.0 and sides.y > 0.0) or Input.is_physical_key_pressed(KEY_Q) else 0.0
 	var keys := 0.0
 	if Input.is_physical_key_pressed(KEY_A):
 		keys -= 1.0
@@ -145,6 +153,7 @@ func _process(_delta: float) -> void:
 	for pad in (Input.get_connected_joypads() if use_pads else []):
 		stick += _axis(pad, JOY_AXIS_LEFT_X)
 		look += Vector2(_axis(pad, JOY_AXIS_RIGHT_X), _axis(pad, JOY_AXIS_RIGHT_Y))
+		brake = maxf(brake, _axis(pad, JOY_AXIS_TRIGGER_LEFT))
 	turn = clampf(held + keys + stick, -1.0, 1.0)
 	look = look.limit_length(1.0)
 

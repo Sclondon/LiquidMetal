@@ -1,14 +1,17 @@
 extends CanvasLayer
-## The title menu (ENDLESS RUN / ARENA / TEST AREA, with your bests) and the game-over card after
-## a splat (how it went, AGAIN / MENU).
+## The title menu (ENDLESS RUN / ARENA / TEST AREA / MODEL VIEWER, the difficulty, your bests at
+## it) and the game-over card after a splat (how it went, AGAIN / MENU).
 
 signal endless_chosen
 signal arena_chosen
 signal test_area_chosen
+signal viewer_chosen
 signal menu_chosen
 signal again_chosen
+signal difficulty_chosen(level: int)
 
 const UI := preload("res://scripts/ui_theme.gd")
+const Difficulty := preload("res://scripts/difficulty.gd")
 
 var _title := VBoxContainer.new()
 var _over := VBoxContainer.new()
@@ -18,6 +21,8 @@ var _result := Label.new()
 var _result_more := Label.new()
 var _result_best := Label.new()
 var _shade := ColorRect.new()
+var _difficulty: Button
+var _level := Difficulty.DEFAULT
 
 
 func _ready() -> void:
@@ -37,7 +42,7 @@ func _ready() -> void:
 		box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		box.grow_vertical = Control.GROW_DIRECTION_BOTH
 		box.alignment = BoxContainer.ALIGNMENT_CENTER
-		box.add_theme_constant_override("separation", 12)
+		box.add_theme_constant_override("separation", 7) # (the title's five buttons, bests and tips fit 720 high)
 		root.add_child(box)
 
 	var name_box := HBoxContainer.new()
@@ -52,10 +57,22 @@ func _ready() -> void:
 	_title.add_child(_bests)
 	_title.add_child(_spacer(6))
 	_title.add_child(_button("ENDLESS RUN", "how far can you get?", func(): endless_chosen.emit()))
-	_title.add_child(_button("ARENA", "survive the waves", func(): arena_chosen.emit()))
+	_title.add_child(_button("ARENA", "online: fight the room for top mass", func(): arena_chosen.emit()))
 	_title.add_child(_button("TEST AREA", "play around", func(): test_area_chosen.emit()))
+	_title.add_child(_button("MODEL VIEWER", "get a good look at Mercury", func(): viewer_chosen.emit()))
+	# The difficulty: press to step through them (left / right on a gamepad or keys step back too)
+	_difficulty = _button("", "", func(): _step_difficulty(1))
+	_difficulty.custom_minimum_size.y = 84
+	_difficulty.add_theme_font_size_override("font_size", 24)
+	_difficulty.gui_input.connect(func(event: InputEvent):
+		for step in [[&"ui_left", -1], [&"ui_right", 1]]:
+			if event.is_action_pressed(step[0]):
+				_step_difficulty(step[1])
+				_difficulty.accept_event())
+	_title.add_child(_difficulty)
+	_show_difficulty()
 	_title.add_child(_spacer(4))
-	var tips := UI.caption("HOLD a side to turn  ·  SWIPE to jump, duck, dodge  ·  DASH to punch", 16)
+	var tips := UI.caption("HOLD a side to turn  ·  SWIPE to jump, duck, dodge  ·  DASH to slash", 16)
 	tips.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	tips.custom_minimum_size.x = 440
 	_title.add_child(tips)
@@ -75,19 +92,37 @@ func _ready() -> void:
 	hide_all()
 
 
-func show_title(best_run: int, best_wave: int) -> void:
-	var bits := []
-	if best_run > 0:
-		bits.append("BEST RUN %d" % best_run)
-	if best_wave > 0:
-		bits.append("BEST WAVE %d" % best_wave)
-	_bests.text = "   ·   ".join(bits)
-	_bests.visible = not bits.is_empty()
+func show_title(best_run: int, best_mass: int, level: int) -> void:
+	_level = level
+	_show_difficulty()
+	show_bests(best_run, best_mass)
 	_shade.visible = true
 	_title.visible = true
 	_focus_first(_title)
 	_over.visible = false
 	_pop(_title)
+
+
+## The best run at the difficulty picked, and the most mass he's had in the arena
+func show_bests(best_run: int, best_mass: int) -> void:
+	var bits := []
+	if best_run > 0:
+		bits.append("BEST RUN %d" % best_run)
+	if best_mass > 0:
+		bits.append("BEST MASS %d" % best_mass)
+	_bests.text = "   ·   ".join(bits)
+	_bests.visible = not bits.is_empty()
+
+
+func _step_difficulty(by: int) -> void:
+	_level = posmod(_level + by, Difficulty.TIERS.size())
+	_show_difficulty()
+	difficulty_chosen.emit(_level)
+
+
+func _show_difficulty() -> void:
+	var tier: Dictionary = Difficulty.TIERS[_level]
+	_difficulty.text = "<   DIFFICULTY: %s   >\n%s" % [tier.name, tier.note]
 
 
 ## headline: the big result; more: the details; best: the best line (or NEW BEST!)

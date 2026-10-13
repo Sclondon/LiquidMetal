@@ -34,6 +34,7 @@ var _surface_material := ShaderMaterial.new()
 var _wall_surface := MeshInstance3D.new() # the crash splat (body and arms) on whatever was hit
 var _wall_surface_material := ShaderMaterial.new()
 const SURFACE_SIZE := 12.0 # little puddles left at the landing's contact points
+const SURFACE_DIVISIONS := 140 # the liquid surface's mesh: a vertex every ~8.5 cm
 var _support := 0.0 # the hand down on a sharp turn, smoothed
 var _dab_hand := 0.0 # seconds till the landing hand's puddle # the arms, splatting a beat after the body
 var _since_dodge := 99.0 # seconds since a dodge began (and which way: _dodge_dir)
@@ -93,6 +94,8 @@ var rewind_on_splat := true # false (endless mode): a splat ends the run, no com
 var dash_cooldown := 0.0
 var speed := 0.0 # actual speed: builds up to run_speed (the legs pump hard getting there)
 const ACCELERATION := 9.0 # m/s per second
+const BRAKING := 24.0 # m/s per second, slowing down on the brake
+var braking := 0.0 # 0..1, how hard the brake's on
 var _pool_size := 0.0 # the puddle's size, on a wobbly spring
 var _pool_velocity := 0.0 # seconds until the next dash (the HUD's button shows it)
 
@@ -124,7 +127,7 @@ var _pool_offset := Vector3.ZERO # where the puddle sits under him
 var _look_clock := 0.0
 var _bounce_t := 9.0
 var _dash_kick := 0.0
-const PUNCHES := ["L", "R", "both"] # each dash in turn: left, right, then the clap
+const PUNCHES := ["L", "R", "both"] # each dash's slash in turn: left blade, right, then the X
 var _punch_index := 2
 var _punch := 0.0
 var _floor_y := 0.0
@@ -146,7 +149,7 @@ var _droplets := preload("res://scripts/droplets.gd").new()
 # (Mercury itself is on its own render layer, which the probe leaves out)
 const OWN_LAYER := 2
 var _probe := ReflectionProbe.new()
-var real_reflections := false # (the painted chrome, matching the puddles; TUNE turns real ones on)
+var real_reflections := true # (always, where the renderer can: the web build keeps the painted chrome; enemies too)
 var _trail := preload("res://scripts/trail.gd").new()
 # Metal splashing up at each foot while it's on the ground: carried along with Mercury (local
 # coordinates) and short-lived, so it stays at the feet instead of trailing off behind
@@ -250,7 +253,12 @@ func _ready() -> void:
 
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(SURFACE_SIZE, SURFACE_SIZE)
+	# Finely divided: the shader lifts each vertex by the liquid's height there (it stands up in 3D)
+	plane.subdivide_width = SURFACE_DIVISIONS
+	plane.subdivide_depth = SURFACE_DIVISIONS
 	_surface.mesh = plane
+	_surface.extra_cull_margin = 0.3 # (lifted off the flat plane its bounds are worked out from)
+	_wall_surface.extra_cull_margin = 0.3
 	_surface_material.shader = preload("res://shaders/puddles.gdshader")
 	_surface.material_override = _surface_material
 	_surface.top_level = true
@@ -419,7 +427,7 @@ func _on_jump() -> void:
 		_droplets.burst(4)
 		_trick("jump", 1.0, 0.6)
 		return
-	if not is_on_floor():
+	if not grounded():
 		# In the air: just above the ground, it's kept for the landing; higher up, a double jump
 		var ray := PhysicsRayQueryParameters3D.create(global_position, global_position + Vector3.DOWN * 0.9)
 		ray.exclude = [get_rid()]
@@ -451,7 +459,7 @@ func _on_duck() -> void:
 	if dead:
 		return
 	_duck_left = DUCK_TIME
-	if is_on_floor():
+	if grounded():
 		if not ducking:
 			_hop_left = HOP_TIME # a little hop up into the slide
 		_set_ducking(true)
@@ -504,7 +512,7 @@ func boost() -> void:
 	boosted.emit()
 
 
-## The punch thrown: launched, harder and further the longer it was wound up
+## The slash: launched, harder and further the longer it was wound up
 func _launch_punch() -> void:
 	_dash_power = 1.0 + _charge * 1.2
 	_dash_left = DASH_TIME * (1.0 + _charge)
@@ -521,15 +529,157 @@ func make_enemy() -> void:
 	collision_layer = 2
 	collision_mask = 1
 	rewind_on_splat = false
-	for target in [_figure_material, _material]:
-		target.set_shader_parameter("sky_top", Color(0.25, 0.02, 0.04))
-		target.set_shader_parameter("horizon", Color(1.0, 0.25, 0.15))
-		target.set_shader_parameter("ground", Color(0.08, 0.02, 0.02))
-		target.set_shader_parameter("grid_glow", Color(1.0, 0.2, 0.1))
-	_figure.set_shader("sky_top", Color(0.25, 0.02, 0.04))
-	_figure.set_shader("horizon", Color(1.0, 0.25, 0.15))
-	_figure.set_shader("ground", Color(0.08, 0.02, 0.02))
-	_figure.set_shader("grid_glow", Color(1.0, 0.2, 0.1))
+	set_real_reflections(false) # (a live probe each would cost too much: the painted chrome, in red)
+	set_tint(ENEMY_TINT)
+
+
+const ENEMY_TINT := { top = Color(0.25, 0.02, 0.04), horizon = Color(1.0, 0.25, 0.15), ground = Color(0.08, 0.02, 0.02), glow = Color(1.0, 0.2, 0.1), trail = Color(1.0, 0.3, 0.2) }
+
+## The painted chrome in another colour: what its metal mirrors (sky, horizon, ground, the grid's
+## glow) and its slash's trail
+func set_tint(tint: Dictionary) -> void:
+	# (the liquid surfaces its splats and puddles melt into too, or they'd come out chrome)
+	for target in [_figure_material, _material, _surface_material, _wall_surface_material]:
+		target.set_shader_parameter("sky_top", tint.top)
+		target.set_shader_parameter("horizon", tint.horizon)
+		target.set_shader_parameter("ground", tint.ground)
+		target.set_shader_parameter("grid_glow", tint.glow)
+	_figure.set_shader("sky_top", tint.top)
+	_figure.set_shader("horizon", tint.horizon)
+	_figure.set_shader("ground", tint.ground)
+	_figure.set_shader("grid_glow", tint.glow)
+	_figure.trail_color = tint.trail
+
+
+# --- The arena's battle room ---------------------------------------------------------------
+# Runners there don't bump into each other (hits are worked out by the arena, by how close they
+# are): everyone's on layer 2 and only collides with the world. A puppet is somebody else's
+# runner: no collisions at all, moved by the states their game sends.
+
+var puppet := false
+var size := 1.0 # grown with its mass (the arena sets it)
+var _brawling := false
+var _net_pos := Vector3.ZERO
+var _net_heading := 0.0
+var _net_speed := 0.0
+var _net_age := 0.0
+var _net_floor := true
+var _net_armed := false
+var _net_kicked := false
+
+
+func enter_brawl() -> void:
+	_brawling = true
+	collision_layer = 2
+	collision_mask = 1
+	rewind_on_splat = false
+
+
+func leave_brawl() -> void:
+	_brawling = false
+	collision_layer = 1
+	collision_mask = 1 | 2
+	set_size(1.0)
+
+
+## Another runner in the room, in its own colour
+func make_brawler(tint: Dictionary) -> void:
+	enter_brawl()
+	set_real_reflections(false)
+	set_tint(tint)
+
+
+func make_puppet() -> void:
+	puppet = true
+	collision_layer = 0
+	collision_mask = 0
+
+
+func set_size(to: float) -> void:
+	size = to
+	_set_shape(PUDDLE if ducking else STAND)
+
+
+## On the floor (a puppet: so its owner's game says)
+func grounded() -> bool:
+	return _net_floor if puppet else is_on_floor()
+
+
+## Slashing, or winding up to: what it runs into bursts
+func armed() -> bool:
+	return _net_armed if puppet else (is_dashing() or _dash_kick > 0.0 or _charging)
+
+
+## Back on its feet after bursting
+func revive(spot: Vector3, facing: float) -> void:
+	place(spot, facing)
+	_net_pos = spot
+	_net_heading = facing
+	_net_age = 0.0
+	_net_floor = true
+	_net_armed = false
+	if puppet:
+		make_puppet()
+	elif _brawling:
+		enter_brawl()
+
+
+## Where it is and what it's doing, for the other games in the room: 11 bytes (id, flags, x, y,
+## z in cm, heading, speed)
+func net_state(id: int) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(11)
+	out[0] = id
+	out[1] = (1 if ducking else 0) | (2 if is_dashing() else 0) | (4 if armed() else 0) | (8 if grounded() or wall_running else 0) | (16 if _dash_kick > 0.0 else 0)
+	out.encode_s16(2, clampi(roundi(global_position.x * 100.0), -32768, 32767))
+	out.encode_s16(4, clampi(roundi(global_position.y * 100.0), -32768, 32767))
+	out.encode_s16(6, clampi(roundi(global_position.z * 100.0), -32768, 32767))
+	out.encode_s16(8, roundi(wrapf(heading, -PI, PI) * 10000.0))
+	out[10] = clampi(roundi(speed * 4.0), 0, 255)
+	return out
+
+
+## A puppet: the state at `at` in a packet from its owner's game
+func net_apply(data: PackedByteArray, at: int) -> void:
+	var flags := data[at + 1]
+	_net_pos = Vector3(data.decode_s16(at + 2), data.decode_s16(at + 4), data.decode_s16(at + 6)) / 100.0
+	_net_heading = data.decode_s16(at + 8) / 10000.0
+	_net_speed = data[at + 10] / 4.0
+	_net_age = 0.0
+	var on_floor := flags & 8 != 0
+	if _net_floor and not on_floor and flags & 1 == 0:
+		_trick("jump", 1.0, 0.6) # it jumped: one of the flips
+		_droplets.burst(3)
+	_net_floor = on_floor
+	ducking = flags & 1 != 0
+	if flags & 16 != 0 and not _net_kicked and _dash_kick <= 0.0 and not is_dashing():
+		# Its dash: the steps and the arm cocking back here too, then the slash
+		_punch_index = (_punch_index + 1) % PUNCHES.size()
+		_dash_kick = DASH_KICK
+		_figure.kick(DASH_KICK)
+	_net_kicked = flags & 16 != 0
+	if flags & 2 != 0 and _dash_left <= 0.0 and _dash_kick <= 0.0:
+		_dash_left = 0.12
+	_net_armed = flags & 4 != 0
+
+
+## A puppet's step: eased toward where its owner last said it was, carried on along its heading
+## for the moment since
+func _puppet_step(delta: float) -> void:
+	_net_age += delta
+	var going := _net_speed * (DASH_BOOST if _dash_left > 0.0 else 1.0)
+	var aim := _net_pos + Vector3(-sin(_net_heading), 0.0, -cos(_net_heading)) * going * minf(_net_age, 0.25)
+	var before := global_position
+	if before.distance_to(aim) > 10.0:
+		global_position = aim
+		reset_physics_interpolation()
+	else:
+		global_position = before.lerp(aim, 1.0 - exp(-16.0 * delta))
+		velocity = (global_position - before) / delta
+	heading = lerp_angle(heading, _net_heading, 1.0 - exp(-16.0 * delta))
+	speed = _net_speed
+	run_speed = maxf(_net_speed, 1.0)
+	_dash_left = maxf(_dash_left - delta, 0.0)
 
 
 ## Dashed through: bursts into blobs of liquid metal flung on with the hit
@@ -574,6 +724,9 @@ func _on_dash() -> void:
 func _physics_process(delta: float) -> void:
 	if dead:
 		return
+	if puppet:
+		_puppet_step(delta)
+		return
 	steer = move_toward(steer, input.turn, delta * 7.0)
 	heading -= steer * deg_to_rad(turn_rate) * delta
 
@@ -585,13 +738,17 @@ func _physics_process(delta: float) -> void:
 
 	if wall_running:
 		velocity.y -= GRAVITY * WALL_GRAVITY * delta
-	elif not is_on_floor():
+	elif not grounded():
 		velocity.y -= GRAVITY * (FAST_FALL if _fast_fall else 1.0) * delta
 	_wall_cooldown = maxf(_wall_cooldown - delta, 0.0)
 	_since_dodge += delta
 	dash_cooldown = maxf(dash_cooldown - delta, 0.0)
 	# Builds back up to running speed (sliding as a puddle and landing hard slow it)
-	speed = move_toward(speed, run_speed, ACCELERATION * delta) # (a slide keeps its speed)
+	# Braking (the left trigger, Q, or both sides of the screen held) slows it, down to a stop
+	braking = clampf(input.brake, 0.0, 1.0) if "brake" in input else 0.0
+	var cruise := run_speed * (1.0 - braking)
+	var rate := BRAKING if braking > 0.0 and speed > cruise else ACCELERATION
+	speed = move_toward(speed, cruise, rate * delta) # (a slide keeps its speed)
 	var going := speed
 	if _dash_left > 0.0:
 		going *= DASH_BOOST * _dash_power
@@ -640,7 +797,7 @@ func _physics_process(delta: float) -> void:
 			_wall_lost = 0.0
 		else:
 			_wall_lost += delta
-		if is_on_floor() or _wall_lost > 0.12 or _wall_time > WALL_RUN_MAX:
+		if grounded() or _wall_lost > 0.12 or _wall_time > WALL_RUN_MAX:
 			_end_wall_run()
 	elif side_wall != Vector3.ZERO and _since_dodge < 0.45 and _dodge_dir == -signf(side_wall.dot(right())) and _wall_cooldown <= 0.0 and not ducking:
 		# (only from a side dodge into the wall)
@@ -657,7 +814,7 @@ func _physics_process(delta: float) -> void:
 		_splat()
 		return
 
-	var on_floor := is_on_floor()
+	var on_floor := grounded()
 	if on_floor or wall_running:
 		_air_jumps = 1
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
@@ -679,7 +836,7 @@ func _physics_process(delta: float) -> void:
 				_dab(feet[f], -1, 0.0, 1.0, Vector3.UP, 0.9)
 				_dab(feet[f], f, 0.0, 0.45, Vector3.UP, 0.7)
 			_dab_hand = 0.12
-			speed *= 0.6 # the landing costs speed: pump back up
+		# (landing keeps its speed: the run carries straight on)
 		_land_splat()
 		_squash = 0.3
 		_droplets.burst(5)
@@ -751,7 +908,7 @@ func _process(delta: float) -> void:
 
 	# Mercury: stretched by vertical speed in the air, squished on landing, flattening as it melts
 	var stretch := Vector3.ONE
-	if not is_on_floor():
+	if not grounded():
 		var s := clampf(velocity.y / 30.0, -0.2, 0.25)
 		stretch = Vector3(1.0 - s * 0.5, 1.0 + s, 1.0 - s * 0.5)
 	stretch *= Vector3(1.0 + _squash * 0.5, 1.0 - _squash * 0.8, 1.0 + _squash * 0.5)
@@ -778,7 +935,7 @@ func _process(delta: float) -> void:
 		var across := up.cross(back).normalized()
 		var on_wall := Basis(across, up, across.cross(up)) * spin
 		turn = Basis(Quaternion(turn.orthonormalized()).slerp(Quaternion(on_wall.orthonormalized()), smoothstep(0.0, 1.0, _wall_roll)))
-	var middle := Vector3.UP * 0.9
+	var middle := Vector3.UP * 0.9 * size
 	var hop := 0.0
 	if _hop_left > 0.0:
 		_hop_left = maxf(_hop_left - delta, 0.0)
@@ -786,15 +943,20 @@ func _process(delta: float) -> void:
 	# Splatting: squashed flat and spread wide, about its feet (so it stays on the floor)
 	var sunk := smoothstep(0.0, 1.0, _sink)
 	var flat := Vector3(1.0 + sunk * 0.5, (1.0 - melt * 0.25) * (1.0 - sunk * 0.95), 1.0 + sunk * 0.5) # held low in the dive, then sinking in
-	var body := turn * Basis.from_scale(stretch * flat)
+	var body := turn * Basis.from_scale(stretch * flat * size)
 	var pivot := middle.lerp(Vector3.ZERO, melt)
 	# (on the wall: feet on its face, which is half a body-width off, at the capsule's middle)
 	var wall_spot := Vector3.UP * 0.65 - _wall_normal * 0.5
 	_figure.transform = Transform3D(body, (pivot - body * pivot + Vector3.UP * hop * (1.0 - melt)).lerp(wall_spot, smoothstep(0.0, 1.0, _wall_roll)))
 	var pose_steer := 0.0 if wall_running else steer
 	_look_around(delta)
-	var tucked := (not is_on_floor() and not wall_running) or _dodge_left > 0.0
-	_figure.animate(delta, run_speed * (DASH_BOOST if is_dashing() else 1.0), tucked, velocity.y, pose_steer, ducking, _land_hold > 0.0 and not ducking, clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0))
+	var tucked := (not grounded() and not wall_running) or _dodge_left > 0.0
+	# (braking: the stride slows with it, no pumping to get back up to speed; stopped, it stands,
+	# breathing, till it's let go; and it stands when it isn't running at all: the title menu)
+	var stopped := (braking > 0.5 and speed < 1.5 and grounded()) or not is_physics_processing()
+	var stride := lerpf(run_speed, speed, braking) * (DASH_BOOST if is_dashing() else 1.0)
+	var effort := clampf(1.0 - speed / maxf(run_speed, 0.1), 0.0, 1.0) * (1.0 - braking)
+	_figure.animate(delta, stride, tucked, velocity.y, pose_steer, ducking, _land_hold > 0.0 and not ducking, effort, stopped and not ducking)
 	_land_hold = maxf(_land_hold - delta, 0.0)
 	# Jumping, dashing or dodging, every part turns into a ball of liquid; back to shards after
 	_liquid_hold = maxf(_liquid_hold - delta, 0.0)
@@ -812,22 +974,22 @@ func _process(delta: float) -> void:
 		if not input.dash_held() or dead:
 			_charging = false
 			_launch_punch()
-	# The right arm: cocked back through the steps, punched out (and stretched) through the dash,
-	# then springing back
+	# The blade (or both, for the X): raised through the steps, slashed down across through the
+	# dash, then back to the run
 	var cock := 1.0 - _dash_kick / DASH_KICK if _dash_kick > 0.0 else (1.0 + _charge * 0.5 if _charging else 0.0)
 	_punch = move_toward(_punch, 1.0 if is_dashing() else 0.0, delta * (14.0 if is_dashing() else 4.0))
 	_figure.set_punch(cock, _punch, PUNCHES[_punch_index])
-	var liquid := (not is_on_floor() and not wall_running) or _liquid_hold > 0.0
+	var liquid := (not grounded() and not wall_running) or _liquid_hold > 0.0
 	_figure.set_liquid(1.0 if liquid else 0.0, delta)
 
 	# Now and then, running, a blob or two shakes loose
 	_drip_clock -= delta
-	if _drip_clock <= 0.0 and is_on_floor() and melt < 0.1:
+	if _drip_clock <= 0.0 and grounded() and melt < 0.1:
 		_drip_clock = randf_range(0.15, 0.45)
 		_droplets.burst(randi_range(1, 2), 0.7)
 
 	# Splashing at its feet while it runs on the ground, and a track under each foot
-	var running := is_on_floor() and not dead and _sink < 0.5
+	var running := grounded() and not dead and _sink < 0.5
 	var foot_spots := _figure.feet()
 	if melt > 0.5:
 		# Sliding: spraying from the front of each foot and where the hands drag on the floor
@@ -846,7 +1008,7 @@ func _process(delta: float) -> void:
 		spray.position = Vector3(at.x, 0.05, at.z)
 		spray.rotation.y = heading
 		spray.emitting = running and foot_spots[f].y - global_position.y < 0.15 # only while it's down
-	var ground := global_position.y if is_on_floor() else NAN
+	var ground := global_position.y if grounded() else NAN
 	# The puddles carried along under what made them (landing and dive alike)
 	var feet_now := _figure.feet()
 	for dab in _dabs:
@@ -898,7 +1060,7 @@ func _process(delta: float) -> void:
 				_dab(_figure.hand(), -1, 0.0, 1.0, Vector3.UP, 0.9)
 				_dab(_figure.hand(), 2, 0.0, 0.45, Vector3.UP, 0.7)
 		# A sharp turn at speed: the inside hand down on the floor, holding it up
-		var sharp := absf(steer) > 0.85 and is_on_floor() and speed > 8.0 and _land_hold <= 0.0 and not ducking and _spin_left <= 0.0 and _punch < 0.1 and _dodge_left <= 0.0
+		var sharp := absf(steer) > 0.85 and grounded() and speed > 8.0 and _land_hold <= 0.0 and not ducking and _spin_left <= 0.0 and _punch < 0.1 and _dodge_left <= 0.0
 		_support = move_toward(_support, 1.0 if sharp else 0.0, delta * 5.0)
 		_figure.turn_support = 0.0 if wall_running else _support
 		if _support > 0.6:
@@ -906,7 +1068,7 @@ func _process(delta: float) -> void:
 			contacts.append(Vector3(hand.x, global_position.y, hand.z))
 			for c in contacts.size():
 				contacts[c].y = global_position.y
-		if _land_hold > LAND_HOLD - LAND_PLANTED and is_on_floor():
+		if _land_hold > LAND_HOLD - LAND_PLANTED and grounded():
 			# The superhero landing: both feet and the hand planted, three tracks dragged along the
 			# floor (pinned down: in the pose they hover just off it, which would break them up)
 			contacts.append(_figure.hand())
@@ -945,7 +1107,7 @@ func _process(delta: float) -> void:
 		_pool_offset = to_local(centre) * Vector3(1.0, 0.0, 1.0)
 	elif not _blob.visible:
 		_pool_offset = Vector3.ZERO
-	_blob.scale = Vector3(1.25 * (1.0 + wobble * 0.5 + ripple), 0.32 * maxf(1.0 - wobble - ripple, 0.3), 1.4 * long * (1.0 + wobble * 0.3 - ripple)) * maxf(pooled, 0.01)
+	_blob.scale = Vector3(1.25 * (1.0 + wobble * 0.5 + ripple), 0.32 * maxf(1.0 - wobble - ripple, 0.3), 1.4 * long * (1.0 + wobble * 0.3 - ripple)) * maxf(pooled, 0.01) * size
 	_blob.position = Vector3(_pool_offset.x, BLOB_RADIUS * _blob.scale.y, _pool_offset.z)
 	_blob.rotation = Vector3(0.0, heading, lean)
 	_feed_surface()
@@ -1169,7 +1331,7 @@ func _old_wall_surface_unused() -> void:
 ## The floor's liquid surface: every puddle on the floor as a disc (the big slide puddle as a
 ## row of three along it), for the shader to melt together
 func _feed_surface() -> void:
-	if is_on_floor() and not wall_running:
+	if grounded() and not wall_running:
 		_floor_y = global_position.y
 	_surface.global_position = Vector3(global_position.x, _floor_y + 0.015, global_position.z) # (stays on the floor when he jumps)
 	var o := _surface.global_position
@@ -1265,10 +1427,10 @@ func _land_splat() -> void:
 	_land_skid.restart()
 
 
-func _set_shape(size: Dictionary) -> void:
-	_shape.radius = size.radius
-	_shape.height = size.height
-	_collider.position.y = size.height * 0.5
+func _set_shape(shape: Dictionary) -> void:
+	_shape.radius = shape.radius * size
+	_shape.height = shape.height * size
+	_collider.position.y = shape.height * size * 0.5
 
 
 func _set_ducking(on: bool) -> void:
@@ -1437,6 +1599,7 @@ func _respawn_at(spot: Vector3, facing: float) -> void:
 	_set_shape(STAND)
 	reset_physics_interpolation()
 	dead = false
+	_exploded = false
 	# Pulls itself back together out of a puddle
 	_melt = 1.0
 	_charging = false

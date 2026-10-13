@@ -13,6 +13,7 @@ signal dash
 
 var turn := 0.0
 var look := Vector2.ZERO
+var brake := 0.0 # (it never brakes)
 var use_pads := false
 var dash_button_down := false
 
@@ -22,8 +23,8 @@ var target: CharacterBody3D # the player
 ## Arena: straight at him whichever side of him it's on (not just from behind)
 var always_chase := false
 
-const CHASE_SPEED := 1.35 # times his run speed, while behind him
-const PASSED_SPEED := 0.78 # once past him
+const Difficulty := preload("res://scripts/difficulty.gd")
+const PASSED_SPEED := 0.78 # times his run speed, once past him (while behind: the difficulty's chase)
 const FEEL := 7.0 # metres ahead it looks for obstacles
 
 var _done := {}
@@ -54,13 +55,14 @@ func _physics_process(delta: float) -> void:
 	if target and not target.dead:
 		var to_him: Vector3 = target.global_position - body.global_position
 		var behind: bool = always_chase or to_him.dot(target.forward()) > -1.0 # (it's behind him, or level)
-		body.run_speed = target.run_speed * (CHASE_SPEED if behind else PASSED_SPEED)
+		var chase: float = Difficulty.tier().arena_chase if always_chase else Difficulty.tier().chase
+		body.run_speed = target.run_speed * (chase if behind else PASSED_SPEED)
 		aim = target.global_position + target.forward() * 2.0 if behind else body.global_position + target.forward() * 10.0
 	var to_aim: Vector3 = aim - body.global_position
 	var want := atan2(-to_aim.x, -to_aim.z)
 	var off := wrapf(want - body.heading, -PI, PI)
 	# (+turn is right, which lowers the heading)
-	var steer := clampf(-off * 2.5, -1.0, 1.0)
+	var steer := clampf(-off * float(Difficulty.tier().steer), -1.0, 1.0) # (gentler on easier tiers: wider turns)
 	if _hold_line > 0.0:
 		steer *= 0.2
 	turn = clampf(steer + _swerve, -1.0, 1.0)
