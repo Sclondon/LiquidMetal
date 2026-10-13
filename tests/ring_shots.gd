@@ -27,6 +27,7 @@ func _initialize() -> void:
 		["06_curtain", _before.bind("curtain", 17.0), 0.5],
 		["07_wall", _before.bind("wall", 22.0), 0.5],
 		["08_palisade", _before.bind("wallrun", 14.0), 0.5],
+		["08b_split", _before.bind("split", 20.0), 0.5],
 		["09_crystal_coming", _crystal, 1.3],
 		["10_crystal_landed", func(): pass, 0.42],
 		["11_crystal_stays", func(): pass, 1.2],

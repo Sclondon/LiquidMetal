@@ -27,8 +27,12 @@ var always_chase := false
 ## Endless: the ground has breaks in it and edges to fall off, so it looks where it's putting
 ## its feet (off everywhere else: the test area and the arena are as they were)
 var mind_ground := false
+## Endless: it starts out ahead of him, coming the other way down the ring; it runs at him, and
+## once it's gone by (if he's let it) it comes round and chases like the rest
+var head_on := false
 
 const Difficulty := preload("res://scripts/difficulty.gd")
+const HEAD_ON_SPEED := 0.6 # times his run speed, coming at him
 const PASSED_SPEED := 0.78 # times his run speed, once past him (while behind: the difficulty's chase)
 const FEEL := 7.0 # metres ahead it looks for obstacles
 
@@ -60,10 +64,15 @@ func _physics_process(delta: float) -> void:
 	var aim: Vector3 = body.global_position + body.forward() * 10.0
 	if target and not target.dead:
 		var to_him: Vector3 = target.global_position - body.global_position
+		if head_on and to_him.dot(target.forward()) > 5.0:
+			head_on = false # (gone by him: round, and after him)
 		var behind: bool = always_chase or to_him.dot(target.forward()) > -1.0 # (it's behind him, or level)
 		var chase: float = Difficulty.tier().arena_chase if always_chase else Difficulty.tier().chase
 		body.run_speed = target.run_speed * (chase if behind else PASSED_SPEED)
 		aim = target.global_position + target.forward() * 2.0 if behind else body.global_position + target.forward() * 10.0
+		if head_on:
+			body.run_speed = target.run_speed * HEAD_ON_SPEED
+			aim = target.global_position
 	var to_aim: Vector3 = aim - body.global_position
 	var want := atan2(-to_aim.x, -to_aim.z)
 	var off := wrapf(want - body.heading, -PI, PI)
@@ -71,6 +80,8 @@ func _physics_process(delta: float) -> void:
 	var steer := clampf(-off * float(Difficulty.tier().steer), -1.0, 1.0) # (gentler on easier tiers: wider turns)
 	if _hold_line > 0.0:
 		steer *= 0.2
+	if head_on:
+		steer *= 0.4 # (it's coming fast: a step aside gets clear of it)
 	turn = clampf(steer + _swerve, -1.0, 1.0)
 	if mind_ground and _ground_turn != 0.0:
 		turn = _ground_turn # (the ground comes first)

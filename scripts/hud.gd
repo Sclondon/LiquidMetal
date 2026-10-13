@@ -22,7 +22,9 @@ var _banner := Label.new()
 var _tune_button := Button.new()
 var _panel := PanelContainer.new()
 var _flash := ColorRect.new()
-var _dash := Button.new()
+var _dash := ColorRect.new() # the DASH dome
+var _dash_material := ShaderMaterial.new()
+var _dash_press := 0.0
 var _board := PanelContainer.new() # the arena's standings
 var _board_rows := VBoxContainer.new()
 var _feed := Label.new()
@@ -91,24 +93,29 @@ func _ready() -> void:
 	_feed.modulate.a = 0.0
 	root.add_child(_feed)
 
-	# DASH, bottom right, under your right thumb; dim while it recharges
-	_dash.text = "DASH"
-	_dash.custom_minimum_size = Vector2(140, 140)
-	_dash.add_theme_font_size_override("font_size", 28)
-	# A round gel button in a chrome ring: orange, brighter under the thumb
-	_dash.add_theme_stylebox_override("normal", UI.orb(UI.ORANGE.darkened(0.25)))
-	_dash.add_theme_stylebox_override("hover", UI.orb(UI.ORANGE))
-	_dash.add_theme_stylebox_override("pressed", UI.orb(UI.LIME.darkened(0.2)))
-	_dash.add_theme_stylebox_override("focus", UI.orb(UI.ORANGE.darkened(0.25)))
-	_dash.focus_mode = Control.FOCUS_NONE
-	_dash.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 24)
-	_dash.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	# DASH: a half-round of liquid metal standing on the bottom edge, as wide as the screen
+	# (shaders/dash_dome.gdshader). Touches on it are the runner input's (any finger, while
+	# another steers); a mouse press is taken here.
+	_dash.color = Color.WHITE
+	_dash_material.shader = preload("res://shaders/dash_dome.gdshader")
+	_dash.material = _dash_material
+	_dash.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_dash.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_dash.button_down.connect(func():
-		player.input.dash_button_down = true
-		player.input.dash.emit()
+	_dash.mouse_filter = Control.MOUSE_FILTER_PASS
+	_dash.gui_input.connect(func(event: InputEvent):
+		# (a real mouse only: a finger's press comes through the runner input)
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.device != InputEvent.DEVICE_ID_EMULATION and (not event.pressed or is_over_dash(event.global_position)):
+			player.input.dash_button_down = event.pressed
+			if event.pressed:
+				player.input.dash.emit()
 	)
-	_dash.button_up.connect(func(): player.input.dash_button_down = false)
+	var dash_word := UI.heading("DASH", 30, UI.NAVY)
+	dash_word.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dash_word.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	dash_word.offset_top = 22
+	dash_word.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dash.add_child(dash_word)
+	player.dashed.connect(func(): _dash_press = 1.0)
 	root.add_child(_dash)
 
 	_build_panel(root)
@@ -178,14 +185,32 @@ func _slider(rows: VBoxContainer, title: String, low: float, high: float, step: 
 
 
 ## True when a screen point is on a button or the open panel (so it isn't a steer)
+## True when a screen point is on the DASH dome (the half-ellipse that fills its rectangle)
+func is_over_dash(point: Vector2) -> bool:
+	if not visible:
+		return false
+	var box := _dash.get_global_rect()
+	if box.size.x <= 0.0 or box.size.y <= 0.0:
+		return false
+	var across := (point.x - box.get_center().x) / (box.size.x * 0.5)
+	var up := (box.end.y - point.y) / box.size.y
+	return up >= 0.0 and across * across + up * up <= 1.0
+
+
 func is_over_ui(point: Vector2) -> bool:
-	if _tune_button.get_global_rect().has_point(point) or _dash.get_global_rect().has_point(point):
+	if _tune_button.get_global_rect().has_point(point) or is_over_dash(point):
 		return true
 	return _panel.visible and _panel.get_global_rect().has_point(point)
 
 
 func _process(_delta: float) -> void:
-	_dash.modulate.a = 0.4 if player.dash_cooldown > 0.0 else 1.0
+	# The dome: about a sixth of the screen high (a shallower arc on a wide screen than a tall one)
+	var screen := get_viewport().get_visible_rect().size
+	var tall := clampf(screen.x * 0.5, 96.0, screen.y * 0.17)
+	_dash.offset_top = -tall
+	_dash_press = move_toward(_dash_press, 0.0, _delta * 2.5)
+	_dash_material.set_shader_parameter("press", _dash_press)
+	_dash_material.set_shader_parameter("ready", 1.0 - clampf(player.dash_cooldown / 1.2, 0.0, 1.0))
 
 
 ## What the stats panel shows (empty: hidden)

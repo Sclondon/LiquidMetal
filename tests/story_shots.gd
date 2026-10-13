@@ -1,13 +1,12 @@
 extends SceneTree
-## Screenshots of the story before the menu: a picture part-way through every shot and every card,
-## and one of the title menu it ends on. Needs a window:
+## Screenshots of the story that plays behind the title menu: a picture part-way through every
+## shot of one round of it (the menu over it, as it's seen). Needs a window:
 ## godot --path . -s res://tests/story_shots.gd -- <out dir>
 
 var main: Node
 var seen := -1
 var since := 0.0
 var shot := false
-var over := false
 var t := 0.0
 
 
@@ -23,20 +22,10 @@ func _shot(name: String) -> void:
 
 func _process(delta: float) -> bool:
 	t += delta
-	if seen == -1 and t > 0.5:
-		main.story.finished.connect(func(): over = true)
-		main.story.skippable = false
-		main.start_story()
-		seen = 0
+	if t < 0.5:
 		return false
-	if seen < 0:
-		return false
-	if over:
-		since += delta
-		if since > 1.0:
-			_shot("99_menu")
-			return true
-		return false
+	if main.story.rounds > 0:
+		return true
 	var at: int = main.story._at
 	if at != seen:
 		seen = at

@@ -1,8 +1,9 @@
 extends MeshInstance3D
-## The wall a dash leaves behind it: a standing sheet of the runner's own metal along the line of
-## the dash (the way a light cycle leaves a wall, but poured, not lit). It runs up out of the
-## ground behind him as he goes, stands a couple of seconds with its top edge rippling, then sinks
-## back. Anybody else who runs into it while it stands is burst (the arena, and the runner for its
+## The wall a dash leaves behind it: a thin, smooth blade of the runner's own metal standing along
+## the line of the dash (the way a light cycle leaves a wall, but poured, not lit). It runs up out
+## of the ground behind him as he goes, stands a couple of seconds, then sinks back. The line is
+## drawn as one curve through the points it was laid along, so a dash on the turn leaves a bend,
+## not corners. Anybody else who runs into it while it stands is burst (the arena, and the runner for its
 ## chasers, ask `hits`). World space. The runner calls `extend` every step of a dash and `stop`
 ## when it's over.
 
@@ -10,7 +11,8 @@ const LIFE := 2.6 # seconds a length of it stands
 const RISE := 0.12 # ...of which this getting up
 const SINK := 0.5 # ...and this going back down
 const STEP := 0.45 # metres between the points it's laid along
-const THICK := 0.34 # how thick the slab is at its foot
+const THICK := 0.06 # how thick the blade is at its foot (it comes to an edge at the top)
+const FINE := 4 # lengths drawn between each two points, along the curve through them
 
 var material: Material
 ## How tall it stands (the runner's size scales it)
@@ -83,35 +85,31 @@ func _process(delta: float) -> void:
 	for run in _runs:
 		if run.size() < 2:
 			continue
-		# A slab with some body to it (seen end on from behind, by whoever made it, it's still there):
-		# its two faces, and its top
-		for face in [1.0, -1.0, 0.0]:
+		# The line it stands on: the curve through its points, and how far up it is at each
+		var line: Array[Vector3] = []
+		var ups: Array[float] = []
+		var last_point: int = run.size() - 1
+		for k in last_point:
+			var before: Vector3 = run[maxi(k - 1, 0)].pos
+			var from: Vector3 = run[k].pos
+			var to: Vector3 = run[k + 1].pos
+			var after: Vector3 = run[mini(k + 2, last_point)].pos
+			for step in (FINE + 1 if k == last_point - 1 else FINE):
+				var along := float(step) / FINE
+				var age: float = lerpf(run[k].age, run[k + 1].age, along)
+				line.append(from.cubic_interpolate(to, before, after, along))
+				ups.append(smoothstep(0.0, RISE, age) * (1.0 - smoothstep(LIFE - SINK, LIFE, age)))
+		# A blade: two faces leaning in to one edge along the top
+		for face in [1.0, -1.0]:
 			_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, material)
-			for k in run.size():
-				var point: Dictionary = run[k]
-				var at: Vector3 = point.pos
-				var next: Vector3 = run[mini(k + 1, run.size() - 1)].pos
-				var last: Vector3 = run[maxi(k - 1, 0)].pos
-				var across: Vector3 = (next - last).cross(Vector3.UP).normalized()
-				var up := smoothstep(0.0, RISE, float(point.age)) * (1.0 - smoothstep(LIFE - SINK, LIFE, float(point.age)))
-				# Its top edge: running in little waves, like something poured
-				var top := height * up * (1.0 + 0.05 * sin(k * 1.9 + _clock * 7.0) + 0.03 * sin(k * 0.7 - _clock * 4.0))
-				var half := across * THICK * 0.5
-				var a: Vector3
-				var b: Vector3
-				var normal := across * float(face)
-				if float(face) > 0.0:
-					a = at + half + Vector3.DOWN * 0.05
-					b = at + half * 0.7 + Vector3.UP * top
-				elif float(face) < 0.0:
-					a = at - half * 0.7 + Vector3.UP * top
-					b = at - half + Vector3.DOWN * 0.05
-				else:
-					a = at + half * 0.7 + Vector3.UP * top
-					b = at - half * 0.7 + Vector3.UP * top
-					normal = Vector3.UP
+			for k in line.size():
+				var at: Vector3 = line[k]
+				var across: Vector3 = (line[mini(k + 1, line.size() - 1)] - line[maxi(k - 1, 0)]).cross(Vector3.UP).normalized()
+				var foot: Vector3 = at + across * THICK * 0.5 * float(face) + Vector3.DOWN * 0.05
+				var top: Vector3 = at + Vector3.UP * height * ups[k]
+				var normal: Vector3 = across * float(face)
 				_mesh.surface_set_normal(normal)
-				_mesh.surface_add_vertex(a)
+				_mesh.surface_add_vertex(foot if float(face) > 0.0 else top)
 				_mesh.surface_set_normal(normal)
-				_mesh.surface_add_vertex(b)
+				_mesh.surface_add_vertex(top if float(face) > 0.0 else foot)
 			_mesh.surface_end()

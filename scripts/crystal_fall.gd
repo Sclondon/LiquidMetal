@@ -5,6 +5,9 @@ extends Node3D
 ## burst of shards and black sand, and there it stays, stuck in the ring at a slant, something to
 ## go round (its collider comes on as it lands). `struck` tells the course, which splats whoever
 ## was under it and jolts the camera.
+## `kind` (set before it's in the tree): "shard", the plain one; "boulder", a great lump of
+## crystals grown together, much more to go round; "bar", a long one that comes down flat across
+## the way, low enough to jump. `from`, if set, is where it comes from (a ship's gun: war.gd).
 
 signal struck(crystal: Node3D)
 
@@ -18,6 +21,14 @@ const BLOCK := Vector3(2.6, 5.0, 2.6) # what it stops, once landed
 const SHAFT := 14.0 # how tall the light over the mark is
 
 var warn := 1.6
+var kind := "shard"
+## Where it comes from, from where it lands (zero: out of the sky ahead)
+var from := Vector3.ZERO
+## What it stops once landed, how near its middle (across, along) it splats a runner as it lands,
+## and what a runner does about it ("avoid" / "jump")
+var block := BLOCK
+var reach := Vector2(HIT, HIT)
+var act := "avoid"
 var color := Color(0.65, 0.4, 1.0)
 var landed := false
 
@@ -34,10 +45,10 @@ var _flash := OmniLight3D.new()
 
 
 func _ready() -> void:
-	_from = FROM.rotated(Vector3.UP, randf_range(-0.35, 0.35))
+	_from = from if from != Vector3.ZERO else FROM.rotated(Vector3.UP, randf_range(-0.35, 0.35))
 	# The mark on the sand
 	var plane := PlaneMesh.new()
-	plane.size = Vector2.ONE * HIT * 3.2
+	plane.size = reach * 3.2
 	_mark.mesh = plane
 	_mark_material.shader = preload("res://shaders/crystal_mark.gdshader")
 	_mark_material.set_shader_parameter("color", color)
@@ -47,8 +58,8 @@ func _ready() -> void:
 	add_child(_mark)
 	# A shaft of its light standing on the mark (the mark alone is hard to see from low down)
 	var column := CylinderMesh.new()
-	column.top_radius = HIT * 0.75
-	column.bottom_radius = HIT * 0.75
+	column.top_radius = reach.y * 0.75
+	column.bottom_radius = reach.y * 0.75
 	column.height = SHAFT
 	column.cap_top = false
 	column.cap_bottom = false
@@ -58,6 +69,7 @@ func _ready() -> void:
 	_shaft_material.set_shader_parameter("shaft", SHAFT)
 	_shaft.material_override = _shaft_material
 	_shaft.position.y = SHAFT * 0.5
+	_shaft.scale.x = reach.x / reach.y
 	_shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_shaft)
 	# The crystal, point first down the line it falls along
@@ -66,9 +78,9 @@ func _ready() -> void:
 	material.set_shader_parameter("horizon", color)
 	material.set_shader_parameter("sky_top", color.darkened(0.7))
 	material.set_shader_parameter("clarity", 0.35)
-	_shard.mesh = Crystal.shard(RADIUS, LENGTH, 0.4)
+	_shard.mesh = _mesh()
 	_shard.material_override = material
-	_shard.basis = _along(_from)
+	_shard.basis = _along(Vector3(1.0, 0.06, 0.0)) if kind == "bar" else _along(_from)
 	add_child(_shard)
 	# Its tail: a long thin shard of plain light behind it
 	var glow := StandardMaterial3D.new()
@@ -81,12 +93,13 @@ func _ready() -> void:
 	_tail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_shard.add_child(_tail)
 	_tail.position.y = 36.0
+	_tail.visible = kind != "bar" # (the bar comes down sideways on)
 	# What it stops once it's down (a plain box: fair to run round)
 	var body := StaticBody3D.new()
 	var shape := BoxShape3D.new()
-	shape.size = BLOCK
+	shape.size = block
 	_collider.shape = shape
-	_collider.position.y = BLOCK.y * 0.5
+	_collider.position.y = block.y * 0.5
 	_collider.disabled = true
 	body.add_child(_collider)
 	add_child(body)
@@ -96,6 +109,34 @@ func _ready() -> void:
 	_flash.position.y = 2.5
 	add_child(_flash)
 	_place(0.0)
+
+
+## What a kind is, for the course to plan round before one's made: its block, its reach, its act
+static func spec(of: String) -> Dictionary:
+	match of:
+		"boulder":
+			return { block = Vector3(5.6, 5.5, 5.6), reach = Vector2(4.0, 4.0), act = "avoid" }
+		"bar":
+			return { block = Vector3(10.0, 0.9, 1.3), reach = Vector2(5.6, 1.8), act = "jump" }
+	return { block = BLOCK, reach = Vector2(HIT, HIT), act = "avoid" }
+
+
+## The crystal itself: one shard; or a clump of them grown out of one middle; or one long one
+func _mesh() -> ArrayMesh:
+	match kind:
+		"boulder":
+			var tool := SurfaceTool.new()
+			tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+			tool.set_smooth_group(-1)
+			Crystal.add_shard(tool, Transform3D.IDENTITY, 2.5, 2.5, LENGTH, 0.3)
+			for k in 6:
+				var lean := Basis(Vector3(cos(k * 1.05), 0.0, sin(k * 1.05)), 0.7 + 0.25 * sin(k * 2.3))
+				Crystal.add_shard(tool, Transform3D(lean, lean * Vector3(0.0, 1.2, 0.0)), 1.3, 1.3, 7.0 + sin(k * 1.7), 0.35)
+			tool.generate_normals()
+			return tool.commit()
+		"bar":
+			return Crystal.shard(0.62, 11.0, 0.72)
+	return Crystal.shard(RADIUS, LENGTH, 0.4)
 
 
 ## A basis whose Y runs along `way`
@@ -108,7 +149,7 @@ func _along(way: Vector3) -> Basis:
 func _place(done: float) -> void:
 	# (down the line; the point reaches the sand as the mark closes)
 	var up := _from.normalized()
-	_shard.position = _from * (1.0 - done) + up * (LENGTH * 0.5)
+	_shard.position = _from * (1.0 - done) + (Vector3.UP * 0.5 if kind == "bar" else up * (LENGTH * 0.5))
 	_mark_material.set_shader_parameter("closing", done)
 	_shaft_material.set_shader_parameter("closing", done)
 
@@ -127,9 +168,10 @@ func _process(delta: float) -> void:
 func _land() -> void:
 	landed = true
 	# Stuck in at a slant, the way it came (less steeply: it has to stand as something to dodge)
-	var slant := (_from.normalized() + Vector3.UP * 1.6).normalized()
-	_shard.basis = _along(slant)
-	_shard.position = slant * (STANDS - LENGTH * 0.5)
+	if kind != "bar": # (the bar lies where it fell)
+		var slant := (_from.normalized() + Vector3.UP * (3.0 if kind == "boulder" else 1.6)).normalized()
+		_shard.basis = _along(slant)
+		_shard.position = slant * (STANDS - LENGTH * 0.5)
 	_tail.visible = false
 	_collider.disabled = false
 	_mark_material.set_shader_parameter("closing", 1.0)

@@ -13,8 +13,13 @@ extends Node3D
 ## - Crystal formations, each a simple box to run into but drawn as grown crystal: low ridges to
 ##   jump (amber), curtains and tunnels to slide under (pale blue), tall walls, gates and spires
 ##   to go round (rose), and palisades standing along the ring to wall-run on (green).
-## - Crystals that fall out of the sky ahead of the runner and stay where they land
-##   (crystal_fall.gd; `falling_crystals` switches them off).
+## - Splits: long breaks running along the ring that part it into two paths (or, further in,
+##   three), each with its own things to get by.
+## - Crystals that come down ahead of the runner and stay where they land (crystal_fall.gd;
+##   `falling_crystals` switches them off): shards, great boulders, long bars that land flat
+##   across the way, whole rows of shards. The ships of the war overhead loose them (war.gd).
+## - Crystalien runners: each comes at him head on down the ring first, and, if it gets by,
+##   comes round and chases (ai_input.gd `head_on`).
 ## - Drops to collect, and boost rings of aurora light (boost_pad.gd).
 ## It gets denser the further you go, each zone (500 m) adds kinds (ZONE_KINDS), and main.gd
 ## speeds the runner up. `plan` lists everything laid, as boxes with what to do about each (the
@@ -30,10 +35,10 @@ const RUNWAY := 45.0 # clear ring at the start
 const SLAB := 3.0 # how thick the ring is drawn at its edges and breaks
 const DEEP := 8.0 # how deep the floor's colliders go (the far side of a break is a wall)
 const FALL := -4.0 # this far below the ring and the runner's splatted
-const KINDS := ["ridge", "curtain", "wall", "crack", "bite", "hole", "wallrun"]
-# Deeper zones add more: zone 2 gates and fields of spires, zone 3 tunnels and causeways,
-# zone 4 rifts (two cracks, one after the other)
-const ZONE_KINDS := [[], ["gate", "spires"], ["tunnel", "causeway"], ["rift"]]
+const KINDS := ["ridge", "curtain", "wall", "crack", "bite", "hole", "wallrun", "split"]
+# Deeper zones add more: zone 2 gates and fields of spires, zone 3 tunnels, causeways and
+# forks (the ring split three ways), zone 4 rifts (two cracks, one after the other)
+const ZONE_KINDS := [[], ["gate", "spires"], ["tunnel", "causeway", "fork"], ["rift"]]
 const ZONE_LENGTH := 500.0
 ## Each zone's look: name, sky overhead, horizon glow, fog, and its crystal colour (lines)
 const ZONES := [
@@ -49,8 +54,8 @@ const ZONES := [
 signal zone_changed(index: int, zone: Dictionary)
 
 var zone := 0
-const GAP_EASY := 27.0 # metres between one thing and the next at the start...
-const GAP_HARD := 18.0 # ...closing to this by HARD_AT metres in
+const GAP_EASY := 19.0 # metres between one thing and the next at the start...
+const GAP_HARD := 12.0 # ...closing to this by HARD_AT metres in
 const HARD_AT := 2500.0
 const SIDEWAYS := 0.55 # metres across the ring a runner can be asked to make per metre along
 const TUNNEL := 10.0 # metres of low roof
@@ -64,6 +69,8 @@ const WALL_RUN_COLOR := Color(0.3, 0.95, 0.6) # the tall walls made for running 
 const BoostPad := preload("res://scripts/boost_pad.gd")
 const Crystal := preload("res://scripts/crystal.gd")
 const CrystalFall := preload("res://scripts/crystal_fall.gd")
+const War := preload("res://scripts/war.gd")
+const STRAFE_LEAD := 2.0 # seconds before crystals fall that the ship loosing them shows up
 const Runner := preload("res://scripts/player.gd")
 const AiInput := preload("res://scripts/ai_input.gd")
 const Difficulty := preload("res://scripts/difficulty.gd")
@@ -106,6 +113,8 @@ var _fall_clock := 6.0
 ## How many crystals have been sent down this run
 var crystals_sent := 0
 var _jolt := 0.0
+var _war: Node3D # the ships overhead (war.gd)
+var _striker: Node3D # the one coming in to loose the next crystals
 
 
 func _ready() -> void:
@@ -119,6 +128,8 @@ func _ready() -> void:
 	_build_modules()
 	_ring = RingWorld.new()
 	add_child(_ring)
+	_war = War.new()
+	add_child(_war)
 	generate()
 
 
@@ -178,8 +189,9 @@ func _physics_process(delta: float) -> void:
 		_ring.set_color(look.lines)
 		zone_changed.emit(zone, look)
 	if with_enemies and distance() > 60.0 and enemies.size() < int(Difficulty.tier().endless_enemies) and _rng.randf() < delta * float(Difficulty.tier().endless_rate):
-		_spawn_enemy(runner.global_position.z + _rng.randf_range(22.0, 34.0)) # behind him: they chase
+		_spawn_enemy(runner.global_position.z - _rng.randf_range(95.0, 125.0)) # ahead of him, coming the other way
 	_extend()
+	_war.position.z = runner.global_position.z
 	_ring.follow(runner.global_position.z, _chunks[0].from if not _chunks.is_empty() else INF, _built_to)
 	# Into a break, or off the edge: a short fall, and that's that
 	if runner.global_position.y < FALL and not runner.dead:
@@ -197,6 +209,8 @@ func _physics_process(delta: float) -> void:
 			enemy._splat()
 	if falling_crystals and not runner.dead and distance() > FALL_FROM:
 		_fall_clock -= delta
+		if _fall_clock <= STRAFE_LEAD and not is_instance_valid(_striker):
+			_striker = _war.strafe(maxf(_fall_clock, 0.0)) # (a ship comes down the ring to loose them)
 		if _fall_clock <= 0.0:
 			_send_crystals()
 	# Clear what's well behind
@@ -357,6 +371,37 @@ func _design(kind: String, speed: float) -> Array:
 			var middle := _rng.randf_range(-12.0, 12.0)
 			pieces.append(_piece("hole", "hole", 0.0, long, -HALF, middle - wide * 0.5, 0.0))
 			pieces.append(_piece("hole", "hole", 0.0, long, middle + wide * 0.5, HALF, 0.0))
+		"split", "fork": # long breaks along the ring: two paths (a fork: three), each with its own things on it
+			var long := _rng.randf_range(70.0, 110.0)
+			var edges: Array[float] = [-HALF]
+			if kind == "split":
+				var wide := _rng.randf_range(5.0, 7.0)
+				var middle := _rng.randf_range(-8.0, 8.0)
+				pieces.append(_piece("hole", "hole", 0.0, long, middle - wide * 0.5, middle + wide * 0.5, 0.0))
+				edges.append_array([middle - wide * 0.5, middle + wide * 0.5])
+			else:
+				var wide := _rng.randf_range(4.5, 6.0)
+				var out := _rng.randf_range(8.0, 11.0)
+				var shift := _rng.randf_range(-3.0, 3.0)
+				for side in [-1.0, 1.0]:
+					pieces.append(_piece("hole", "hole", 0.0, long, shift + side * out - wide * 0.5, shift + side * out + wide * 0.5, 0.0))
+					edges.append_array([shift + side * out - wide * 0.5, shift + side * out + wide * 0.5])
+			edges.append(HALF)
+			# Down each path: something to jump, something to slide under, or a spire to pass
+			for path in edges.size() / 2:
+				var x0: float = edges[path * 2]
+				var x1: float = edges[path * 2 + 1]
+				var on := _rng.randf_range(16.0, 30.0)
+				while on < long - 14.0:
+					match _rng.randi() % 3:
+						0:
+							pieces.append(_piece("ridge", "jump", on, on + 0.5, x0, x1, 0.8))
+						1:
+							pieces.append(_piece("curtain", "duck", on, on + 0.8, x0, x1, 2.3))
+						2:
+							var x := _rng.randf_range(x0 + 2.5, x1 - 2.5)
+							pieces.append(_piece("spire", "avoid", on - 0.9, on + 0.9, x - 0.9, x + 0.9, 6.0))
+					on += _rng.randf_range(24.0, 34.0)
 		"wallrun": # a tall palisade standing along the ring, made for running on
 			var x := _rng.randf_range(8.0, 19.0) * (-1.0 if _rng.randf() < 0.5 else 1.0)
 			pieces.append(_piece("palisade", "avoid", 0.0, 40.0, x - 0.45, x + 0.45, 8.5))
@@ -450,8 +495,11 @@ func _extras(node: Node3D, kind: String, pieces: Array, z: float, free: Array) -
 	return false
 
 
-## An enemy runner: the player's own runner with an AI at the controls
+## An enemy runner: a Crystalien (the player's own runner, cut from crystal, an AI at the
+## controls). Put down ahead of him it comes the other way down the ring first, at him; behind
+## him it's straight into the chase.
 func _spawn_enemy(z: float) -> void:
+	var ahead := runner != null and z < runner.global_position.z
 	# Never on top of anything, or over a break: nudged on until it's 8 m clear
 	var x: float = clampf((runner.global_position.x if runner else 0.0) + _rng.randf_range(-2.0, 2.0), -HALF + 4.0, HALF - 4.0)
 	for tries in 12:
@@ -461,8 +509,8 @@ func _spawn_enemy(z: float) -> void:
 				clear = false
 		if clear:
 			break
-		z += 6.0 # (further back: they spawn behind him)
-	if runner and z - runner.global_position.z < 15.0:
+		z += -6.0 if ahead else 6.0 # (further off)
+	if runner and absf(z - runner.global_position.z) < 15.0:
 		return # (never right on top of him)
 	if not _clear_at(x, z, 2.0):
 		return
@@ -470,14 +518,18 @@ func _spawn_enemy(z: float) -> void:
 	ai.course = self
 	ai.target = runner
 	ai.mind_ground = true
+	ai.head_on = ahead
 	var enemy := Runner.new()
+	enemy.crystal = true
 	enemy.input = ai
 	enemy.add_child(ai)
 	add_child(enemy)
 	ai.body = enemy
 	enemy.make_enemy()
-	enemy.place(Vector3(x, 0.0, z), 0.0)
-	enemy.run_speed = runner.run_speed * float(Difficulty.tier().chase) if runner else 9.0
+	var color: Color = Crystal.COLORS[_looks.randi() % Crystal.COLORS.size()]
+	enemy.set_tint({ top = color.darkened(0.75), horizon = color, ground = color.darkened(0.9), glow = color, trail = color })
+	enemy.place(Vector3(x, 0.0, z), PI if ahead else 0.0)
+	enemy.run_speed = runner.run_speed * (AiInput.HEAD_ON_SPEED if ahead else float(Difficulty.tier().chase)) if runner else 9.0
 	enemy.speed = enemy.run_speed
 	enemies.append(enemy)
 
@@ -504,6 +556,18 @@ func _send_crystals() -> void:
 		count = 2
 	if zone >= 3 and _rng.randf() < 0.3:
 		count = 3
+	# What comes down: mostly shards; a boulder, a bar across the way, or (further in) a row
+	var kind := "shard"
+	var roll := _rng.randf()
+	if roll < 0.2:
+		kind = "bar"
+	elif roll < 0.36:
+		kind = "boulder"
+	elif roll < 0.52 and zone >= 1:
+		kind = "row"
+	if kind != "shard":
+		count = 4 if kind == "row" else 1
+	var side := -1.0 if _rng.randf() < 0.5 else 1.0
 	var warn := 1.6
 	var sent := false
 	var going: Vector3 = runner.velocity
@@ -513,12 +577,22 @@ func _send_crystals() -> void:
 	for k in count:
 		var lead := warn + _rng.randf_range(0.8, 1.4)
 		var spot: Vector3 = runner.global_position + going * lead
-		spot.x += _rng.randf_range(-2.5, 2.5) + (k * _rng.randf_range(5.0, 10.0) * (-1.0 if _rng.randf() < 0.5 else 1.0))
+		if kind == "row": # (strung across his way, a gap between each)
+			spot = runner.global_position + going * (warn + 1.1)
+			spot.x += (k - 1.5) * 9.5 * side + _rng.randf_range(-1.0, 1.0)
+		else:
+			spot.x += _rng.randf_range(-2.5, 2.5) + (k * _rng.randf_range(5.0, 10.0) * (-1.0 if _rng.randf() < 0.5 else 1.0))
 		spot.y = 0.0
+		var what := "shard" if kind == "row" else kind
+		var half_wide: float = CrystalFall.spec(what).block.x * 0.5
 		# Onto open ring only: never in or beside anything laid, where it could shut the way through
 		for tries in 5:
-			if _open_at(spot.x, spot.z) and absf(spot.x) < HALF - 2.5:
-				drop_crystal(spot, warn)
+			if _open_at(spot.x, spot.z, half_wide) and absf(spot.x) < HALF - half_wide - 1.2:
+				# (from the ship that's come for it, if it's still out ahead)
+				var from := Vector3.ZERO
+				if is_instance_valid(_striker) and _striker.global_position.z < spot.z - 40.0:
+					from = _striker.global_position - spot
+				drop_crystal(spot, warn + (k * 0.16 if kind == "row" else 0.0), what, from)
 				sent = true
 				break
 			spot.z -= 5.0
@@ -529,12 +603,12 @@ func _send_crystals() -> void:
 ## Open ring for a crystal to land on: floor, no other crystal within 8 m, and nothing laid
 ## near along the ring, anywhere across it: 14 m clear of whatever has to be gone round (so it
 ## never shuts the way to or from a gap), 8 m short of or 6 m past what's jumped or slid under
-func _open_at(x: float, z: float) -> bool:
-	if not floor_at(x, z):
+func _open_at(x: float, z: float, half_wide := 1.3) -> bool:
+	if not floor_at(x, z) or not floor_at(x - half_wide, z) or not floor_at(x + half_wide, z):
 		return false
 	for thing in plan:
 		if thing.kind == "falling" or thing.kind == "fallen":
-			if Vector2(x - (float(thing.x0) + float(thing.x1)) * 0.5, z - (float(thing.z0) + float(thing.z1)) * 0.5).length() < 8.0:
+			if z < thing.z0 + 8.0 and z > thing.z1 - 8.0 and x + half_wide > thing.x0 - 5.5 and x - half_wide < thing.x1 + 5.5:
 				return false
 		elif thing.act == "avoid" or thing.act == "hole":
 			if z < thing.z0 + 14.0 and z > thing.z1 - 14.0:
@@ -546,8 +620,14 @@ func _open_at(x: float, z: float) -> bool:
 
 ## A crystal out of the sky onto this spot, landing in `warn` seconds (and there to stay). It's
 ## in the plan from now, as "falling" until it lands and "fallen" after.
-func drop_crystal(spot: Vector3, warn := 1.6) -> Node3D:
+func drop_crystal(spot: Vector3, warn := 1.6, what := "shard", from := Vector3.ZERO) -> Node3D:
 	var fall := CrystalFall.new()
+	var spec := CrystalFall.spec(what)
+	fall.kind = what
+	fall.block = spec.block
+	fall.reach = spec.reach
+	fall.act = spec.act
+	fall.from = from
 	fall.warn = warn
 	fall.color = ZONES[_zone_at(spot.z) % ZONES.size()].lines
 	fall.position = Vector3(spot.x, 0.0, spot.z)
@@ -559,8 +639,8 @@ func drop_crystal(spot: Vector3, warn := 1.6) -> Node3D:
 			parent = chunk.node
 	parent.add_child(fall)
 	_id += 1
-	var half: float = CrystalFall.BLOCK.x * 0.5
-	var falling := { id = _id, kind = "falling", act = "avoid", z0 = spot.z + half, z1 = spot.z - half, x0 = spot.x - half, x1 = spot.x + half }
+	var half: Vector3 = fall.block * 0.5
+	var falling := { id = _id, kind = "falling", act = fall.act, z0 = spot.z + half.z, z1 = spot.z - half.z, x0 = spot.x - half.x, x1 = spot.x + half.x }
 	fall.set_meta("plan", falling)
 	crystals_sent += 1
 	# (the plan's kept nearest first)
@@ -578,7 +658,7 @@ func _on_struck(fall: Node3D) -> void:
 	var under: Array = enemies.duplicate()
 	under.append(runner)
 	for body in under:
-		if is_instance_valid(body) and not body.dead and body.global_position.y < CrystalFall.BLOCK.y and Vector2(body.global_position.x - spot.x, body.global_position.z - spot.z).length() < CrystalFall.HIT:
+		if is_instance_valid(body) and not body.dead and body.global_position.y < fall.block.y and Vector2((body.global_position.x - spot.x) / fall.reach.x, (body.global_position.z - spot.z) / fall.reach.y).length() < 1.0:
 			body._splat()
 	if runner:
 		_jolt = maxf(_jolt, clampf(0.5 - spot.distance_to(runner.global_position) / 120.0, 0.0, 0.4))

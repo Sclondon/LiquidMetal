@@ -1,18 +1,17 @@
 extends CanvasLayer
-## The title menu (ENDLESS RUN / ARENA / TEST AREA / MODEL VIEWER, the difficulty, your bests at
-## it) and the game-over card after a splat (how it went, AGAIN / MENU).
+## The title menu (ENDLESS and ARENA, and your bests) and the game-over card after a splat (how
+## it went, AGAIN / MENU). The story plays behind the title (cinematic.gd), so the title is kept
+## light: a name, two buttons. With the dev toggle on (main.gd: ?dev, --dev or the ` key) it also
+## offers the TEST AREA and the MODEL VIEWER.
 
 signal endless_chosen
 signal arena_chosen
 signal test_area_chosen
 signal viewer_chosen
-signal story_chosen
 signal menu_chosen
 signal again_chosen
-signal difficulty_chosen(level: int)
 
 const UI := preload("res://scripts/ui_theme.gd")
-const Difficulty := preload("res://scripts/difficulty.gd")
 
 var _title := VBoxContainer.new()
 var _over := VBoxContainer.new()
@@ -22,8 +21,7 @@ var _result := Label.new()
 var _result_more := Label.new()
 var _result_best := Label.new()
 var _shade := ColorRect.new()
-var _difficulty: Button
-var _level := Difficulty.DEFAULT
+var _dev_only: Array[Control] = []
 
 
 func _ready() -> void:
@@ -48,44 +46,26 @@ func _ready() -> void:
 		box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		box.grow_vertical = Control.GROW_DIRECTION_BOTH
 		box.alignment = BoxContainer.ALIGNMENT_CENTER
-		box.add_theme_constant_override("separation", 5) # (the title's six buttons, bests and tips fit 720 high)
+		box.add_theme_constant_override("separation", 8)
 		root.add_child(box)
 
 	var name_box := HBoxContainer.new()
 	name_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	name_box.add_theme_constant_override("separation", 24)
-	name_box.add_child(UI.heading("LIQUID", 64))
-	name_box.add_child(UI.heading("METAL", 64, UI.LIME))
+	name_box.add_child(UI.heading("LIQUID", 68))
+	name_box.add_child(UI.heading("METAL", 68, UI.LIME))
 	_title.add_child(name_box)
 	_bests.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_bests.add_theme_font_size_override("font_size", 22)
+	_bests.add_theme_font_size_override("font_size", 20)
 	_bests.add_theme_color_override("font_color", UI.LIME)
 	_title.add_child(_bests)
-	_title.add_child(_spacer(6))
-	_title.add_child(_button("ENDLESS RUN", "how far can you get?", func(): endless_chosen.emit()))
-	_title.add_child(_button("ARENA", "online: fight the room for top mass", func(): arena_chosen.emit()))
-	_title.add_child(_button("TEST AREA", "play around", func(): test_area_chosen.emit()))
-	_title.add_child(_button("MODEL VIEWER", "get a good look at Mercury", func(): viewer_chosen.emit()))
-	var story := _button("STORY", "", func(): story_chosen.emit())
-	story.custom_minimum_size.y = 46
-	story.add_theme_font_size_override("font_size", 22)
-	_title.add_child(story)
-	# The difficulty: press to step through them (left / right on a gamepad or keys step back too)
-	_difficulty = _button("", "", func(): _step_difficulty(1))
-	_difficulty.custom_minimum_size.y = 74
-	_difficulty.add_theme_font_size_override("font_size", 21)
-	_difficulty.gui_input.connect(func(event: InputEvent):
-		for step in [[&"ui_left", -1], [&"ui_right", 1]]:
-			if event.is_action_pressed(step[0]):
-				_step_difficulty(step[1])
-				_difficulty.accept_event())
-	_title.add_child(_difficulty)
-	_show_difficulty()
-	_title.add_child(_spacer(4))
-	var tips := UI.caption("HOLD a side to turn  ·  SWIPE to jump, duck, dodge  ·  DASH to slash", 16)
-	tips.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tips.custom_minimum_size.x = 440
-	_title.add_child(tips)
+	_title.add_child(_spacer(10))
+	_title.add_child(_button("ENDLESS", func(): endless_chosen.emit()))
+	_title.add_child(_button("ARENA", func(): arena_chosen.emit()))
+	for extra in [_button("TEST AREA", func(): test_area_chosen.emit(), 52), _button("MODEL VIEWER", func(): viewer_chosen.emit(), 52)]:
+		extra.visible = false
+		_dev_only.append(extra)
+		_title.add_child(extra)
 
 	_over_heading = UI.heading("SPLAT!", 84)
 	_over.add_child(_over_heading)
@@ -97,15 +77,21 @@ func _ready() -> void:
 	_result_best.add_theme_font_size_override("font_size", 26)
 	_result_best.add_theme_color_override("font_color", UI.LIME)
 	_over.add_child(_spacer(6))
-	_over.add_child(_button("AGAIN", "", func(): again_chosen.emit()))
-	_over.add_child(_button("MENU", "", func(): menu_chosen.emit()))
+	_over.add_child(_button("AGAIN", func(): again_chosen.emit()))
+	_over.add_child(_button("MENU", func(): menu_chosen.emit()))
 	hide_all()
 
 
-func show_title(best_run: int, best_mass: int, level: int) -> void:
-	_level = level
-	_show_difficulty()
+## The dev toggle: the test area and the model viewer on the title, or not
+func set_dev(on: bool) -> void:
+	for extra in _dev_only:
+		extra.visible = on
+
+
+func show_title(best_run: int, best_mass: int) -> void:
 	show_bests(best_run, best_mass)
+	# (only a veil over the story going on behind it)
+	_shade.color.a = 0.3
 	_shade.visible = true
 	_title.visible = true
 	_focus_first(_title)
@@ -113,7 +99,7 @@ func show_title(best_run: int, best_mass: int, level: int) -> void:
 	_pop(_title)
 
 
-## The best run at the difficulty picked, and the most mass he's had in the arena
+## The best endless run, and the most mass he's had in the arena
 func show_bests(best_run: int, best_mass: int) -> void:
 	var bits := []
 	if best_run > 0:
@@ -124,22 +110,12 @@ func show_bests(best_run: int, best_mass: int) -> void:
 	_bests.visible = not bits.is_empty()
 
 
-func _step_difficulty(by: int) -> void:
-	_level = posmod(_level + by, Difficulty.TIERS.size())
-	_show_difficulty()
-	difficulty_chosen.emit(_level)
-
-
-func _show_difficulty() -> void:
-	var tier: Dictionary = Difficulty.TIERS[_level]
-	_difficulty.text = "<   DIFFICULTY: %s   >\n%s" % [tier.name, str(tier.note).to_upper()]
-
-
 ## headline: the big result; more: the details; best: the best line (or NEW BEST!)
 func show_game_over(headline: String, more: String, best: String) -> void:
 	_result.text = headline
 	_result_more.text = more
 	_result_best.text = best
+	_shade.color.a = 0.55
 	_shade.visible = true
 	_title.visible = false
 	_over.visible = true
@@ -179,11 +155,11 @@ func _spacer(height: int) -> Control:
 	return gap
 
 
-func _button(text: String, sub: String, pressed: Callable) -> Button:
+func _button(text: String, pressed: Callable, height := 70) -> Button:
 	var button := Button.new()
-	button.text = text if sub == "" else "%s\n%s" % [text, sub]
-	button.custom_minimum_size = Vector2(470, 74 if sub != "" else 62)
-	button.add_theme_font_size_override("font_size", 23)
+	button.text = text
+	button.custom_minimum_size = Vector2(400, height)
+	button.add_theme_font_size_override("font_size", 30 if height >= 70 else 20)
 	button.focus_mode = Control.FOCUS_ALL # (a gamepad moves between them and presses A)
 	button.pressed.connect(pressed)
 	return button

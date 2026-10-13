@@ -1,15 +1,15 @@
 extends CanvasLayer
-## The story, told before the title menu the first time (and from its STORY button after). One
+## The story, told behind the title menu. One
 ## long look at Mercury through a long lens, very close, that starts at his feet and climbs him as
 ## it turns round him, and only at the end reaches his face: he lifts his head and his eye burns.
 ## Cut into that climb, glimpses of where he is: three suns over the sand, the crowd, one of them
 ## breaking, the pit, his own metal crawling back into him. A few words lie over the pictures,
 ## and they explain nothing: he was made; this is a place where things are made to break; what
 ## breaks, he takes in, which he can't bear and can't do without.
-## main.gd sets the stage (the colosseum with its pit open, him standing clear of it) and hands
-## over the camera; this runs the shots and says when it's done. Any key or touch skips it.
+## It plays behind the title menu, round and round, until a mode is picked. main.gd sets the
+## stage (the colosseum with its pit open, him standing clear of it) and hands over the camera;
+## this runs the shots; `halt` puts it away.
 
-signal finished
 
 const UI := preload("res://scripts/ui_theme.gd")
 const AiInput := preload("res://scripts/ai_input.gd")
@@ -36,12 +36,11 @@ const STORY := [
 var cam: Camera3D
 var player: CharacterBody3D
 var colosseum: Node3D # (for its crowd)
-## False: keys and touches don't skip it (the screenshot script: a stray key press would)
-var skippable := true
+## How many times it has been round
+var rounds := 0
 
 var _black := ColorRect.new()
 var _line: Label
-var _skip: Label
 var _at := -1
 var _clock := 0.0
 var _last_tick := 0
@@ -52,11 +51,11 @@ var _lens := CameraAttributesPractical.new()
 
 
 func _ready() -> void:
-	layer = 4
+	layer = 2 # (under the menu)
 	visible = false
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = UI.make()
 	add_child(root)
 	# The bars of a wide picture, top and bottom
@@ -88,16 +87,6 @@ func _ready() -> void:
 	_black.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_black.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(_black)
-	_skip = UI.caption("any key to skip", 15)
-	_skip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 24)
-	_skip.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_skip.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_skip.modulate.a = 0.4
-	_skip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(_skip)
-	root.gui_input.connect(func(event: InputEvent):
-		if skippable and (event is InputEventMouseButton or event is InputEventScreenTouch) and event.pressed:
-			stop())
 	# A long lens: what's behind him goes soft
 	_lens.dof_blur_far_enabled = true
 	_lens.dof_blur_far_transition = 14.0
@@ -112,6 +101,7 @@ func playing() -> bool:
 func play(stage: Node3D) -> void:
 	visible = true
 	_done = false
+	rounds = 0
 	_at = -1
 	_last_tick = Time.get_ticks_msec()
 	_black.color.a = 0.0
@@ -129,8 +119,8 @@ func play(stage: Node3D) -> void:
 	_next()
 
 
-## Over (it ran out, or was skipped)
-func stop() -> void:
+## Put away (a mode's been picked): everything it changed, put back
+func halt() -> void:
 	if _done:
 		return
 	_done = true
@@ -139,15 +129,6 @@ func stop() -> void:
 	cam.attributes = null
 	player.look_up(0.0)
 	player.eye_glow(0.0)
-	finished.emit()
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if _done or not skippable:
-		return
-	if (event is InputEventKey or event is InputEventJoypadButton) and event.pressed:
-		get_viewport().set_input_as_handled()
-		stop()
 
 
 func _next() -> void:
@@ -155,8 +136,13 @@ func _next() -> void:
 	_clock = 0.0
 	_did = false
 	if _at >= STORY.size():
-		stop()
-		return
+		# Round again: his head down, his eye its usual red, the one that broke back on its feet
+		_at = 0
+		rounds += 1
+		_black.color.a = 0.0
+		player.look_up(0.0)
+		player.eye_glow(0.0)
+		_victim.revive(Vector3(-25.0, 0.0, 20.0), 0.6)
 	var beat: Dictionary = STORY[_at]
 	Engine.time_scale = float(beat.get("slow", 1.0))
 	_line.text = "  ".join(str(beat.get("say", "")).split("")) # (spaced out, letter by letter)

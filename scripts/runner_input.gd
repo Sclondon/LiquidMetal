@@ -35,6 +35,9 @@ const HOLD_DELAY := 0.09 # a press held this long without swiping starts turning
 
 ## Returns true for screen points over the HUD, so pressing a button doesn't steer
 var is_over_ui: Callable
+## Whether a screen point is on the DASH dome along the bottom of the screen (the HUD's)
+var is_over_dash: Callable
+var _dash_touch := -1 # the finger that's on it
 
 ## -1 (left) .. +1 (right), read by the player every frame
 var turn := 0.0
@@ -49,10 +52,19 @@ func _now() -> float:
 func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		if event.pressed:
+			if is_over_dash.is_valid() and is_over_dash.call(event.position):
+				# On the dash dome: a dash (held: winding it up), whatever the other fingers are at
+				_dash_touch = event.index
+				dash_button_down = true
+				dash.emit()
+				return
 			if is_over_ui.is_valid() and is_over_ui.call(event.position):
 				return
 			_touches[event.index] = { start = event.position, pos = event.position, time = _now(), used = false }
 		else:
+			if event.index == _dash_touch:
+				_dash_touch = -1
+				dash_button_down = false
 			var touch = _touches.get(event.index)
 			if touch and not touch.used:
 				_try_swipe(touch, event.position)

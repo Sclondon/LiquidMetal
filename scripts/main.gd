@@ -60,7 +60,9 @@ var _sky: ShaderMaterial # shaders/sky.gdshader
 var _sun: DirectionalLight3D
 var sky_show: MeshInstance3D # what moves in the sky: comets and the rest (sky_show.gd)
 var story: CanvasLayer # the story before the menu (cinematic.gd)
-var _story_seen := false # (saved: it plays by itself only the first time)
+## The dev toggle (?dev, --dev, or the ` key on the title): the test area and the model viewer
+## are offered on the menu
+var dev := false
 var _environment: Environment
 
 
@@ -106,22 +108,22 @@ func _ready() -> void:
 	hud.set_enemies = _set_test_enemies
 	add_child(hud)
 	input.is_over_ui = hud.is_over_ui
+	input.is_over_dash = hud.is_over_dash
 
 	menu = Menu.new()
 	menu.endless_chosen.connect(start_endless)
 	menu.test_area_chosen.connect(start_test)
 	menu.arena_chosen.connect(start_arena)
 	menu.viewer_chosen.connect(start_viewer)
-	menu.story_chosen.connect(start_story)
 	story = Cinematic.new()
 	story.cam = cam
 	story.player = player
-	story.finished.connect(_on_story_over)
 	add_child(story)
 	menu.menu_chosen.connect(show_menu)
-	menu.difficulty_chosen.connect(_on_difficulty)
 	menu.again_chosen.connect(restart)
 	add_child(menu)
+	dev = Flags.all().has("dev")
+	menu.set_dev(dev)
 	viewer = Viewer.new()
 	viewer.player = player
 	viewer.cam = cam
@@ -144,18 +146,12 @@ func _ready() -> void:
 		"viewer":
 			start_viewer()
 		_:
-			# The first time it's ever opened (really opened: not by a test), the story first
-			if not _story_seen and get_tree().get_script() == null and not OS.has_feature("editor"):
-				start_story()
-			else:
-				show_menu()
+			show_menu()
 
 
-## The story: Mercury standing in the middle of the colosseum, the camera its to move
-## (cinematic.gd), then the title menu
-func start_story() -> void:
-	_leave_viewer()
-	mode = "story"
+## The story (cinematic.gd), going on behind the title menu: Mercury standing in the colosseum,
+## its pit open, the camera the story's to move. Round and round until a mode is picked.
+func _stage_story() -> void:
 	var stage := Node3D.new()
 	var colosseum := Colosseum.new()
 	stage.add_child(colosseum)
@@ -168,8 +164,6 @@ func start_story() -> void:
 		light.omni_range = 14.0
 		stage.add_child(light)
 	_use_course(stage)
-	menu.hide_all()
-	hud.visible = false
 	player.reset_drops()
 	colosseum.set_floor(14.0) # (the pit open in the middle; he stands clear of it)
 	player.place(Vector3(0.0, 0.0, 34.0), 0.0)
@@ -189,28 +183,31 @@ func start_story() -> void:
 	story.play(stage)
 
 
-func _on_story_over() -> void:
+## The story put away (a mode's been picked): the camera and the controls given back
+func _end_story() -> void:
+	if not story.playing():
+		return
+	story.halt()
 	cam.set_process(true)
-	_input.brake = 0.0
-	_input.set_process(true)
 	cam.h_offset = 0.0
 	cam.v_offset = 0.0
-	if not _story_seen:
-		_story_seen = true
-		_save_bests()
-	show_menu()
+	_input.brake = 0.0
+	_input.set_process(true)
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Gamepad Start: back to the menu
-	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START and mode != "menu" and mode != "story":
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START and mode != "menu":
 		show_menu()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if not event.pressed or event.echo or mode == "story":
+	if not event.pressed or event.echo:
 		return
-	if event.physical_keycode == KEY_R and mode != "menu":
+	if event.physical_keycode == KEY_QUOTELEFT and mode == "menu":
+		dev = not dev
+		menu.set_dev(dev)
+	elif event.physical_keycode == KEY_R and mode != "menu":
 		restart()
 	elif event.physical_keycode == KEY_ESCAPE and mode != "menu":
 		show_menu()
@@ -278,15 +275,9 @@ func start_arena() -> void:
 func show_menu() -> void:
 	_leave_viewer()
 	mode = "menu"
-	if area == null or not area is TestArea:
-		_use_course(TestArea.new())
-	player.place(area.start_position, area.start_heading)
-	player.set_physics_process(false)
-	_input.set_process_input(false)
 	hud.visible = false
-	cam.snap()
-	_set_sky(Endless.ZONES[0], 0.0)
-	menu.show_title(_best("run"), int(_bests.get("mass", 0)), Difficulty.level)
+	_stage_story() # (the story plays behind the title)
+	menu.show_title(_best("run"), int(_bests.get("mass", 0)))
 
 
 ## The model viewer: Mercury running on the spot at the (empty) test area's start, the camera
@@ -313,6 +304,7 @@ func start_viewer() -> void:
 
 
 func _leave_viewer() -> void:
+	_end_story()
 	viewer.close()
 	cam.target = player
 	_input.set_process(true)
@@ -333,7 +325,7 @@ func _set_test_enemies(on: bool) -> void:
 
 ## A freshly generated course, and back to the start of it
 func restart() -> void:
-	if mode == "viewer" or mode == "story":
+	if mode == "viewer":
 		return
 	if mode == "endless":
 		start_endless()
@@ -482,25 +474,15 @@ func _best(what: String) -> int:
 
 
 ## Picked on the title menu: its bests come up, and it's remembered for next time
-func _on_difficulty(level: int) -> void:
-	Difficulty.level = level
-	menu.show_bests(_best("run"), int(_bests.get("mass", 0)))
-	_save_bests()
-
-
 func _load_bests() -> void:
 	_name = "%s %d" % [NAMES.pick_random(), randi_range(10, 99)]
 	var file := ConfigFile.new()
 	if file.load(BEST_FILE) != OK:
 		return
 	_name = str(file.get_value("settings", "name", _name))
-	_story_seen = bool(file.get_value("settings", "story_seen", false))
 	if file.has_section("best"):
 		for key in file.get_section_keys("best"):
 			_bests[key] = file.get_value("best", key, 0)
-	# (the tests start straight into a mode: they always play NORMAL)
-	if start_mode == "menu":
-		Difficulty.level = clampi(file.get_value("settings", "difficulty", Difficulty.DEFAULT), 0, Difficulty.TIERS.size() - 1)
 
 
 func _save_bests() -> void:
@@ -510,9 +492,7 @@ func _save_bests() -> void:
 	var file := ConfigFile.new()
 	for key in _bests:
 		file.set_value("best", key, _bests[key])
-	file.set_value("settings", "difficulty", Difficulty.level)
 	file.set_value("settings", "name", _name)
-	file.set_value("settings", "story_seen", _story_seen)
 	file.save(BEST_FILE)
 
 

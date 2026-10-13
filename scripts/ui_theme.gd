@@ -17,14 +17,17 @@ static var _font: FontVariation
 static var _made := {} # the images drawn so far, by what they are
 
 
-## The lettering: slanted, wide-set, a little heavier
+## The lettering: wide, round-cornered techno capitals leaning forward, after the arcade racers'
+## print ads of the late nineties (the user's reference is set in Resbaloso, which is T26's to
+## sell: this is Audiowide, fonts/, open licence, slanted to match; a Resbaloso .ttf put at
+## fonts/Resbaloso.ttf is used in its place)
 static func font() -> Font:
 	if _font == null:
 		_font = FontVariation.new()
-		_font.base_font = ThemeDB.fallback_font
-		_font.variation_transform = Transform2D(Vector2(1.0, 0.0), Vector2(0.17, 1.0), Vector2.ZERO)
-		_font.variation_embolden = 0.25
-		_font.spacing_glyph = 3
+		var own := "res://fonts/Resbaloso.ttf"
+		_font.base_font = load(own if ResourceLoader.exists(own) else "res://fonts/Audiowide-Regular.ttf")
+		_font.variation_transform = Transform2D(Vector2(1.0, 0.0), Vector2(0.22, 1.0), Vector2.ZERO)
+		_font.spacing_glyph = 1
 	return _font
 
 
