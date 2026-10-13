@@ -1,11 +1,12 @@
 extends SceneTree
-## Headless check of wall running in endless mode: jump, dodge into the lane wall, and it should
-## run along the wall (off the floor, not falling) for a good while, then kick off with a jump.
+## Headless check of wall running in endless mode: beside one of the ring's tall palisades, jump,
+## dodge into it, and it should run along the wall (off the floor, not falling) for a good while,
+## then kick off with a jump.
 ## Run: godot --headless --path . -s res://tests/wallrun_test.gd
 
 var main: Node
 var t := 0.0
-var step := 0
+var step := -1
 var started := -1.0
 var lowest := 99.0
 var log := []
@@ -21,8 +22,24 @@ func _initialize() -> void:
 func _process(delta: float) -> bool:
 	t += delta
 	var p: CharacterBody3D = main.player
-	p.run_speed = 6.0 # stays in the runway (no obstacles) for the whole test
+	p.run_speed = 6.0 # stays alongside the palisade (40 m of it) for the whole test
 	match step:
+		-1:
+			# On along the ring to the first palisade, and down beside the start of it, on its left
+			main.area.falling_crystals = false
+			p.set_physics_process(false)
+			for thing in main.area.plan:
+				if thing.kind == "wallrun":
+					p.place(Vector3(float(thing.x0) - 3.2, 0.0, float(thing.z0) - 3.0), 0.0)
+					p.set_physics_process(true)
+					main.cam.snap()
+					step = 0
+					t = 0.0
+					return false
+			p.global_position.z -= 100.0
+			if t > 20.0:
+				print("FAIL no palisade to run on")
+				return true
 		0:
 			if t > 0.8:
 				p.input.jump.emit()
@@ -52,4 +69,4 @@ func _process(delta: float) -> bool:
 				print(line)
 			print("dead: ", p.dead)
 			return true
-	return t > 6.0
+	return t > 6.0 and step >= 0

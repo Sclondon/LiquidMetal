@@ -1,108 +1,144 @@
 extends SceneTree
-## Headless check of endless mode: a bot plays it with the controls, reading the obstacles the
-## course has laid (its lane_plan) as it goes, and should get a long way in without a splat as
-## the speed climbs. Run: godot --headless --path . -s res://tests/endless_bot.gd
+## Headless check of endless mode: a bot plays the ring with the controls, reading what the
+## course has laid (its `plan`: boxes, and what to do about each) as it goes. It steers across the
+## ring to keep clear of the breaks and the tall crystals, jumps the cracks and ridges and slides
+## under the curtains, and should get GOAL metres in without a splat as the speed climbs, several
+## runs one after another, each on a fresh course. Falling crystals are off (they aren't in the
+## plan until they land) unless it's asked for them, to see how it gets on.
+## Run: godot --headless --fixed-fps 60 --path . -s res://tests/endless_bot.gd [-- <runs> [crystals]]
 
-const GOAL := 2100.0 # metres
+const GOAL := 2000.0 # metres
+const SIDEWAYS := 0.5 # metres across per metre along that it plans on managing
+const LEAN := 0.6 # the most it turns off straight ahead (radians)
 
 var main: Node
+var runs := 3
+var run := 0
+var passed := 0
+var clock := 0.0
 var done := {}
-var splatted := false
-var blown := 0
-var last_dodge := 0
-var seen := {}
+var goal_x := 0.0
+var finished := false
+var begun := false
 
 
 func _initialize() -> void:
+	var args := OS.get_cmdline_user_args()
+	if not args.is_empty():
+		runs = maxi(int(args[0]), 1)
 	main = load("res://scenes/main.tscn").instantiate()
 	main.start_mode = "endless"
 	main.enemies = false
 	main.use_pads = false
 	root.add_child(main)
+	begun = false
 
 
-func _actions(obstacle: Dictionary, pace: float) -> Array:
-	# [z where to act, action]; triggers move earlier the faster it runs
-	var z: float = obstacle.z
-	match obstacle.kind:
-		"hurdle":
-			return [[z + 4.5 * pace, "jump"]]
-		"pillars": # through the middle
-			return [[z + 7.0 * pace, "centre"]]
-		"beam", "tunnel":
-			return [[z + 3.0 * pace, "duck"]]
-		"dodge_left", "dodge_both":
-			return [[z + 6.0 * pace, "left"], [z - 2.0, "centre"]]
-		"dodge_right":
-			return [[z + 6.0 * pace, "right"], [z - 2.0, "centre"]]
-		"hurdle_pair":
-			return [[z + obstacle.half + 4.5 * pace, "jump"], [z - obstacle.half + 4.5 * pace, "jump"]]
-	return []
+func _begin() -> void:
+	main.area.falling_crystals = OS.get_cmdline_user_args().has("crystals")
+	done.clear()
+	goal_x = 0.0
+	clock = 0.0
 
 
-func _process(_delta: float) -> bool:
-	var player: CharacterBody3D = main.player
-	player.input.set_process(false) # (the bot sets its turn axis itself)
-	if player.dead and not splatted:
-		splatted = true
-		print("ENDLESS SPLAT at %.0f m (speed %.1f) x=%.2f y=%.2f" % [main.area.distance(), player.run_speed, player.global_position.x, player.global_position.y])
-		for e in main.area.enemies:
-			if is_instance_valid(e):
-				print("  enemy at dz %.1f dx %.1f dead %s" % [e.global_position.z - player.global_position.z, e.global_position.x - player.global_position.x, e.dead])
-		for o in main.area.lane_plan:
-			if absf(o.z - player.global_position.z) < 30.0:
-				print("  nearby: %s at z %.1f (runner at z %.1f)" % [o.kind, o.z, player.global_position.z])
-	if splatted or main.area.distance() >= GOAL or Time.get_ticks_msec() > 220000:
-		print("ENDLESS BOT: %.0f m, zone %d, speed %.1f, %s, enemies blown up %d" % [main.area.distance(), main.area.zone + 1, player.run_speed, "splatted" if splatted else "no splats", blown])
+func _process(delta: float) -> bool:
+	if finished:
 		return true
-	# An enemy closing in from behind on its line: sidestep and let it by
-	for enemy in main.area.enemies:
-		if not is_instance_valid(enemy) or enemy.dead:
-			continue
-		var back: float = enemy.global_position.z - player.global_position.z
-		var dx: float = enemy.global_position.x - player.global_position.x
-		var busy := false
-		for o in main.area.lane_plan:
-			if o.z < player.global_position.z + 3.0 and o.z > player.global_position.z - 16.0:
-				busy = true
-		if not busy and back > 0.0 and back < 6.0 and absf(dx) < 1.3 and player._dodge_left <= 0.0 and Time.get_ticks_msec() - last_dodge > 600:
-			last_dodge = Time.get_ticks_msec()
-			player.input.dodge.emit(-1.0 if player.global_position.x > 0.0 else 1.0)
-	# An enemy ahead in its line: dash through it (the punch launches 0.3 s after the press)
-	for enemy in main.area.enemies:
-		if not is_instance_valid(enemy) or enemy.dead:
-			continue
-		var gap: float = player.global_position.z - enemy.global_position.z
-		var closing: float = maxf(player.speed - enemy.speed, 1.0)
-		if gap > 0.0 and gap < closing * 0.45 + 2.5 and absf(enemy.global_position.x - player.global_position.x) < 1.4 and player.dash_cooldown <= 0.0:
-			player.input.dash.emit()
-	for enemy in main.area.enemies:
-		if is_instance_valid(enemy) and enemy.dead and not seen.has(enemy):
-			seen[enemy] = true
-			blown += 1
-	# Steering back to the middle of the lane between moves (a dodge is a fixed 4.5 m, so without
-	# this it drifts off-centre and can't line up for the pillars): aimed a little toward the middle
-	var aim := clampf(player.global_position.x * 0.08, -0.15, 0.15) # (heading > 0 runs left, toward -x)
-	player.input.turn = clampf((player.heading - aim) * 4.0, -1.0, 1.0) if player._dodge_left <= 0.0 else 0.0
-	var pace: float = maxf(-player.velocity.z, player.run_speed) / 14.0 # (forward speed only: not a dodge's sideways)
+	var player: CharacterBody3D = main.player
+	var course: Node3D = main.area
+	if not begun:
+		begun = true
+		_begin()
+	player.input.set_process(false) # (the bot sets its turn axis itself)
+	clock += delta
+	if player.dead or course.distance() >= GOAL or clock > 300.0:
+		var ok: bool = not player.dead and course.distance() >= GOAL
+		if player.dead:
+			print("ENDLESS SPLAT at %.0f m (speed %.1f) x=%.2f y=%.2f z=%.2f" % [course.distance(), player.run_speed, player.global_position.x, player.global_position.y, player.global_position.z])
+			for thing in course.plan:
+				if absf(thing.z0 - player.global_position.z) < 40.0:
+					print("  nearby: %s %s z %.1f..%.1f x %.1f..%.1f" % [thing.kind, thing.act, thing.z0, thing.z1, thing.x0, thing.x1])
+		print("ENDLESS BOT run %d: %.0f m, zone %d, speed %.1f, %s%s" % [run + 1, course.distance(), course.zone + 1, player.run_speed, "no splats" if ok else ("splatted" if player.dead else "ran out of time"), ", %d crystals fell" % course.crystals_sent if course.falling_crystals else ""])
+		passed += 1 if ok else 0
+		run += 1
+		if run >= runs:
+			print("%s endless bot: %d of %d runs to %d m with no splats" % ["PASS" if passed == runs else "FAIL", passed, runs, int(GOAL)])
+			finished = true
+			return true
+		main.start_endless()
+		_begin()
+		return false
+	var x := player.global_position.x
 	var z := player.global_position.z
-	var plan: Array = main.area.lane_plan
-	for k in plan.size():
-		var actions := _actions(plan[k], pace)
-		for a in actions.size():
-			var key := "%d:%d" % [k, a]
-			if done.has(key) or z > actions[a][0]:
-				continue
-			done[key] = true
-			match actions[a][1]:
-				"centre":
-					# (a dodge is a fixed 4.5 m: only when it ends up nearer the middle than it is now)
-					if absf(player.global_position.x) > 2.25:
-						player.input.dodge.emit(-signf(player.global_position.x))
-				"jump": player.input.jump.emit()
-				"duck": player.input.duck.emit()
-				"left":
-					player.input.dodge.emit(-1.0)
-				"right":
-					player.input.dodge.emit(1.0)
+	var along: float = maxf(-player.velocity.z, 4.0) # (forward speed only)
+	var pace := along / 14.0
+
+	# Across the ring: the nearest line that's clear of everything for as far ahead as it can
+	# manage, setting off for it now or a little further on
+	var best_cost := INF
+	var best_x := x
+	var best_start := 0.0
+	for horizon in [75.0, 55.0, 38.0, 24.0]:
+		for start in [0.0, 12.0, 24.0]:
+			for k in 51:
+				var to: float = -25.0 + k
+				var cost: float = absf(to - x) + start * 0.2 + absf(to) * 0.03 + (0.0 if absf(to - goal_x) < 0.6 else 1.5)
+				if cost < best_cost and _clear(course.plan, x, z, to, start, horizon):
+					best_cost = cost
+					best_x = to
+					best_start = start
+		if best_cost < INF:
+			break
+	goal_x = best_x
+	var aim_x := best_x if best_start == 0.0 else x
+	# (heading > 0 runs left, toward -x)
+	var want := clampf((x - aim_x) * 0.16, -LEAN, LEAN)
+	player.input.turn = clampf((player.heading - want) * 4.0, -1.0, 1.0)
+
+	# The things to jump and to slide under, where it's in line with them
+	for thing in course.plan:
+		if done.has(thing.id) or x < thing.x0 - 0.8 or x > thing.x1 + 0.8:
+			continue
+		var near: float = thing.z0
+		if thing.act == "duck" and z <= near + 3.5 * pace:
+			done[thing.id] = true
+			if z > thing.z1:
+				player.input.duck.emit()
+		elif thing.act == "jump" and thing.kind in ["crack", "rift"]:
+			# A break: off the lip
+			if z <= near + 0.6 + along * 0.04:
+				if z < near - 1.0:
+					done[thing.id] = true # (past its lip: too late, or already over)
+				elif player.is_on_floor():
+					done[thing.id] = true
+					player.input.jump.emit()
+		elif thing.act == "jump" and z <= near + 4.5 * pace:
+			done[thing.id] = true
+			if z > thing.z1:
+				player.input.jump.emit()
+	# Coming down short, over a break: the second jump
+	if not player.is_on_floor() and player.velocity.y < 0.0 and player.global_position.y < 0.7 and player._air_jumps > 0 and not course.floor_at(x, z - along * 0.1):
+		player.input.jump.emit()
 	return false
+
+
+## Is the line from x across to `to` (setting off `start` metres on, then SIDEWAYS across per
+## metre along, then straight) clear of every break and tall thing for `horizon` metres?
+func _clear(plan: Array, x: float, z: float, to: float, start: float, horizon: float) -> bool:
+	for thing in plan:
+		if thing.act != "avoid" and thing.act != "hole":
+			continue
+		var from_d: float = maxf(z - float(thing.z0) - 3.0, 0.0)
+		var to_d: float = z - float(thing.z1) + 3.0
+		if to_d < 0.0 or from_d > horizon:
+			continue
+		var a := _line(x, to, start, from_d)
+		var b := _line(x, to, start, to_d)
+		var room := 1.7
+		if maxf(a, b) > float(thing.x0) - room and minf(a, b) < float(thing.x1) + room:
+			return false
+	return true
+
+
+func _line(x: float, to: float, start: float, d: float) -> float:
+	return move_toward(x, to, maxf(d - start, 0.0) * SIDEWAYS)
