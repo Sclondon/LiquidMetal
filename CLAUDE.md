@@ -110,3 +110,15 @@ Web build and publish (GitHub Pages serves `build/` from Sclondon/LiquidMetal):
 
 The game is a secret cart in scarbone98/scareathon-v3, unlocked by typing LIQUID into WaysideOS (`src/pages/Arcade/unlocks.ts`).
 After a game push, bump the cache-buster in `LIQUID_METAL_URL` (`...?v=<short commit>`) and push that repo too.
+
+## State after 2026-10-13 (later the same day)
+
+- Launched: a full arcade cart (not secret, not early access), with a preview video and cover in the site repo (`public/game-recordings/LiquidMetal.mp4`, `stills/LiquidMetal.jpg`, cut from `--write-movie` recordings of `endless_bot -- crystals`, the menu and `modes_test`).
+- The game posts `PLAYER_DIED` scores to the arcade page (`main.gd` `_report`): an endless run's score, or ten times the peak mass of an arena round.
+- Menu order is ARENA, then ENDLESS. The banner text is small (34).
+- Arena: a dash costs 8% of mass (floor 5): `dash` / `mass` messages, in both `arena.js` and `arena_room.gd`. Size grows much more with mass (`1 + 3 * grown`); the camera pulls back less than he grows.
+- Dash walls: Mercury's blade lets go into falling goo blobs after 1.7 s; a Crystalien's is a row of rooted crystals (`metal_wall.gd` `crystal`).
+- DASH dome: 60% of the width, see-through, two chevrons instead of a word.
+- Boost rings close once used; in the arena they reopen somewhere else (`boost_pad.gd` `respawn`). A boost widens the view (`follow_cam.gd` `rush`) and draws speed lines (`shaders/speed_lines.gdshader`).
+- Endless: the ring is 40 m wide (`ring_world.gd` `WIDTH`); crystals rain much more often; `wreck` is a shot-down fighter that blows a hole in the ring (`blow_hole` rebuilds the chunk's floor); capital ships (`war.gd`) go up in a supernova now and then and fire on the ring (`beam_strike.gd`: a rake down the ring or a shot at the runner, only where `_room_beside` finds room to step off the line).
+- `endless_bot -- crystals` (hazards on) does not always reach 2000 m: the bot is not good at beams and craters. Without the argument it should always pass.

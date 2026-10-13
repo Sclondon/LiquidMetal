@@ -102,6 +102,10 @@ func _ready() -> void:
 	hud.layer = 2
 	hud.n64 = n64
 	hud.player = player
+	# Through a boost ring: the view opens wide and lines of speed streak in from the edges
+	player.boosted.connect(func():
+		cam.rush = 1.0
+		hud.rush())
 	hud.cam = cam
 	hud.restart = restart
 	hud.to_menu = show_menu
@@ -433,15 +437,15 @@ func _on_splat() -> void:
 	var headline := ""
 	var more := ""
 	var best := ""
-	var tier := Difficulty.tier_name()
 	var score := _score()
 	headline = "%d m" % int(area.distance())
 	more = "SCORE %d  ·  %d drops  ·  %d smashed  ·  zone %d" % [score, player.drops, _smashes, area.zone + 1]
 	if score > _best("run"):
 		_bests[Difficulty.best_key("run")] = score
-		best = "NEW %s BEST!" % tier
+		best = "NEW BEST!"
 	else:
-		best = "%s BEST %d" % [tier, _best("run")]
+		best = "BEST %d" % _best("run")
+	_report(score)
 	_save_bests()
 	_input.set_process_input(false)
 	# Let the splat land first
@@ -454,11 +458,20 @@ func _on_splat() -> void:
 ## The arena's round is up: who won, and the standings stay up till the next one
 func _on_round_over(top: Array) -> void:
 	_keep_mass()
+	if area is Arena and area.peak > 10:
+		_report(area.peak * 10) # (a round's score: ten a point of the most mass he had)
 	if top.is_empty():
 		return
 	var winner: Dictionary = top[0]
 	var mine: bool = int(winner.id) == area.me
 	hud.banner("YOU WIN!" if mine else "ROUND OVER", "%d mass" % int(winner.mass) if mine else "%s wins with %d" % [winner.name, int(winner.mass)])
+
+
+## A finished run's score, told to the arcade page the game's in (it saves it to the board):
+## an endless run's score, or ten times the most mass he had in an arena round
+func _report(score: int) -> void:
+	if OS.has_feature("web") and score > 0:
+		JavaScriptBridge.eval("window.parent.postMessage({ type: 'PLAYER_DIED', score: %d }, '*')" % score)
 
 
 ## The most mass he's had in the arena: kept as his best

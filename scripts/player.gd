@@ -253,6 +253,7 @@ func _ready() -> void:
 	_trail.material = _figure_material
 	add_child(_trail)
 	_wall.material = _figure_material
+	_wall.crystal = crystal # (a Crystalien's is a row of crystals)
 	add_child(_wall)
 	if crystal:
 		# Nothing liquid about a Crystalien: no blobs come off it, it leaves no tracks or puddles of

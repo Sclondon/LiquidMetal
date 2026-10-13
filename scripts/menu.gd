@@ -1,5 +1,5 @@
 extends CanvasLayer
-## The title menu (ENDLESS and ARENA, and your bests) and the game-over card after a splat (how
+## The title menu (ARENA and ENDLESS, and your bests) and the game-over card after a splat (how
 ## it went, AGAIN / MENU). The story plays behind the title (cinematic.gd), so the title is kept
 ## light: a name, two buttons. With the dev toggle on (main.gd: ?dev, --dev or the ` key) it also
 ## offers the TEST AREA and the MODEL VIEWER.
@@ -60,8 +60,8 @@ func _ready() -> void:
 	_bests.add_theme_color_override("font_color", UI.LIME)
 	_title.add_child(_bests)
 	_title.add_child(_spacer(10))
-	_title.add_child(_button("ENDLESS", func(): endless_chosen.emit()))
 	_title.add_child(_button("ARENA", func(): arena_chosen.emit()))
+	_title.add_child(_button("ENDLESS", func(): endless_chosen.emit()))
 	for extra in [_button("TEST AREA", func(): test_area_chosen.emit(), 52), _button("MODEL VIEWER", func(): viewer_chosen.emit(), 52)]:
 		extra.visible = false
 		_dev_only.append(extra)

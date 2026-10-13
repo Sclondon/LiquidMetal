@@ -1,7 +1,9 @@
 extends Node3D
 ## The war over the ring (endless mode): the Crystaliens' ships, and somebody else's.
 ## - Far off to either side, two fleets hang facing each other across the ring and trade bolts;
-##   now and then one of them is hit and a blast swells and goes out.
+##   now and then one of them is hit and a blast swells and goes out. Each side has two capital
+##   ships, very big, further back; once in a while one takes a heavy bolt and goes up like a
+##   supernova (and another comes to take its place).
 ## - Nearer, pairs of ships cross low over the ring ahead, one after the other and shooting at
 ##   it; sometimes the one in front doesn't make it across.
 ## - `strafe` brings one down the ring at the runner: endless.gd has it loose the crystals that
@@ -21,6 +23,7 @@ var _rng := RandomNumberGenerator.new()
 var _hull: ArrayMesh
 var _solid: Array[StandardMaterial3D] = []
 var _light: Array[StandardMaterial3D] = []
+var _faint: Array[StandardMaterial3D] = [] # the bolts': thin and dim (it's a long way off; it mustn't pull the eye)
 var _fleets: Array[MultiMesh] = []
 var _far: Array = [] # a side: [{ home, phase }]
 var _ships: Array = [] # the near ones: { node, velocity, life, side, prey, gun, dies }
@@ -30,11 +33,13 @@ var _lines := ImmediateMesh.new()
 var _clock := 0.0
 var _bolt_clock := 0.6
 var _cross_clock := 4.0
+var _capitals: Array = [] # { node, side, away }: away > 0 while it's gone (seconds till another comes)
+var _nova_clock := 12.0
 
 
 func _ready() -> void:
 	_rng.randomize()
-	_hull = _ship_mesh()
+	_hull = ship_mesh()
 	for side in 2:
 		var color: Color = SIDES[side]
 		# A hull: dark crystal with its side's colour in it (lit plainly: it's far off, in space)
@@ -53,6 +58,9 @@ func _ready() -> void:
 		light.albedo_color = color.lerp(Color.WHITE, 0.35)
 		light.disable_fog = true
 		_light.append(light)
+		var faint: StandardMaterial3D = light.duplicate()
+		faint.albedo_color = color * 0.3
+		_faint.append(faint)
 		# The fleet: off to one side of the ring, strung out along it, nose to the other side
 		var many := MultiMesh.new()
 		many.transform_format = MultiMesh.TRANSFORM_3D
@@ -70,12 +78,30 @@ func _ready() -> void:
 		fleet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		fleet.extra_cull_margin = 2000.0
 		add_child(fleet)
+	for side in 2:
+		var out := -1.0 if side == 0 else 1.0
+		for k in 2:
+			var capital := MeshInstance3D.new()
+			capital.mesh = _hull
+			capital.material_override = _solid[side]
+			capital.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			capital.extra_cull_margin = 3000.0
+			capital.basis = Basis.looking_at(Vector3(-out, 0.0, 0.25 - 0.5 * k), Vector3.UP).scaled(Vector3.ONE * _rng.randf_range(8.0, 11.0))
+			capital.position = Vector3(out * _rng.randf_range(420.0, 640.0), _rng.randf_range(130.0, 280.0), -_rng.randf_range(260.0, 520.0) - 420.0 * k)
+			add_child(capital)
+			_capitals.append({ node = capital, side = side, away = 0.0 })
 	var lines := MeshInstance3D.new()
 	lines.mesh = _lines
 	lines.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	lines.extra_cull_margin = 2000.0
 	add_child(lines)
 	_place_fleets()
+
+
+## One of the capital ships that's there just now (null: none is), for its big gun (endless.gd)
+func capital() -> Node3D:
+	var there: Array = _capitals.filter(func(c): return c.away <= 0.0)
+	return there[_rng.randi() % there.size()].node if not there.is_empty() else null
 
 
 ## A ship down the ring at the runner, to be over the place it fires from in `lead` seconds
@@ -94,14 +120,27 @@ func _process(delta: float) -> void:
 	# The fleets' fire: a bolt from a ship of one side at a ship of the other
 	_bolt_clock -= delta
 	if _bolt_clock <= 0.0:
-		_bolt_clock = _rng.randf_range(0.1, 0.55)
+		_bolt_clock = _rng.randf_range(0.5, 1.8)
 		var side := _rng.randi() % 2
 		var from: Vector3 = _far_spot(side, _rng.randi() % FLEET)
 		var to: Vector3 = _far_spot(1 - side, _rng.randi() % FLEET)
 		var hit := _rng.randf() < 0.3
 		if not hit: # (wide of it, and on past)
 			to += (to - from).normalized() * 160.0 + Vector3(_rng.randf_range(-40.0, 40.0), _rng.randf_range(-40.0, 40.0), _rng.randf_range(-40.0, 40.0))
-		_bolts.append({ from = from, to = to, age = 0.0, life = from.distance_to(to) / 1400.0, side = side, wide = 2.2, blast = 26.0 if hit else 0.0 })
+		_bolts.append({ from = from, to = to, age = 0.0, life = from.distance_to(to) / 1400.0, side = side, wide = 0.5, blast = 11.0 if hit else 0.0 })
+	# A capital ship's turn: a heavy bolt from the other side, and it goes up
+	for capital in _capitals:
+		if capital.away > 0.0:
+			capital.away -= delta
+			if capital.away <= 0.0:
+				capital.node.visible = true
+	_nova_clock -= delta
+	if _nova_clock <= 0.0:
+		_nova_clock = _rng.randf_range(16.0, 30.0)
+		var capital: Dictionary = _capitals[_rng.randi() % _capitals.size()]
+		if capital.away <= 0.0:
+			var from: Vector3 = _far_spot(1 - int(capital.side), _rng.randi() % FLEET)
+			_bolts.append({ from = from, to = capital.node.position, age = 0.0, life = from.distance_to(capital.node.position) / 900.0, side = 1 - int(capital.side), wide = 1.4, blast = 0.0, nova = capital })
 	# A pair across the ring ahead, the second after the first
 	_cross_clock -= delta
 	if _cross_clock <= 0.0:
@@ -114,7 +153,7 @@ func _process(delta: float) -> void:
 		ship.life -= delta
 		ship.dies -= delta
 		if ship.dies <= 0.0:
-			_blast(node.position, 18.0, ship.side)
+			_blast(node.position, 9.0, ship.side)
 		if ship.life <= 0.0 or ship.dies <= 0.0:
 			node.queue_free()
 			_ships.remove_at(k)
@@ -125,9 +164,9 @@ func _process(delta: float) -> void:
 		if prey != null and is_instance_valid(prey) and not prey.is_queued_for_deletion():
 			ship.gun -= delta
 			if ship.gun <= 0.0:
-				ship.gun = _rng.randf_range(0.12, 0.3)
+				ship.gun = _rng.randf_range(0.3, 0.6)
 				var at: Vector3 = prey.position + Vector3(_rng.randf_range(-5.0, 5.0), _rng.randf_range(-5.0, 5.0), _rng.randf_range(-5.0, 5.0))
-				_bolts.append({ from = node.position, to = at + (at - node.position).normalized() * 30.0, age = 0.0, life = 0.16, side = ship.side, wide = 0.55, blast = 0.0 })
+				_bolts.append({ from = node.position, to = at + (at - node.position).normalized() * 30.0, age = 0.0, life = 0.16, side = ship.side, wide = 0.22, blast = 0.0 })
 	# Bolts: a short length of light running from where it was fired to where it's going
 	_lines.clear_surfaces()
 	for side in 2:
@@ -140,13 +179,15 @@ func _process(delta: float) -> void:
 			if bolt.age >= bolt.life:
 				if bolt.blast > 0.0:
 					_blast(bolt.to, bolt.blast, 1 - side)
+				if bolt.has("nova"):
+					_nova(bolt.nova)
 				_bolts.remove_at(k)
 				continue
 			if not any:
-				_lines.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _light[side])
+				_lines.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _faint[side])
 				any = true
 			var head: float = bolt.age / bolt.life
-			var a: Vector3 = (bolt.from as Vector3).lerp(bolt.to, maxf(head - 0.3, 0.0))
+			var a: Vector3 = (bolt.from as Vector3).lerp(bolt.to, maxf(head - 0.12, 0.0))
 			var b: Vector3 = (bolt.from as Vector3).lerp(bolt.to, head)
 			var along := (b - a).normalized()
 			var across := along.cross(Vector3.UP).normalized() * float(bolt.wide)
@@ -160,13 +201,13 @@ func _process(delta: float) -> void:
 	for k in range(_blasts.size() - 1, -1, -1):
 		var blast: Dictionary = _blasts[k]
 		blast.age += delta
-		var done: float = blast.age / 0.8
+		var done: float = blast.age / float(blast.life)
 		if done >= 1.0:
 			blast.node.queue_free()
 			_blasts.remove_at(k)
 			continue
 		blast.node.scale = Vector3.ONE * float(blast.big) * (0.25 + 0.75 * sqrt(done))
-		blast.material.albedo_color.a = (1.0 - done) * (1.0 - done)
+		blast.material.albedo_color.a = (1.0 - done) * (1.0 - done) * float(blast.peak)
 
 
 func _place_fleets() -> void:
@@ -215,27 +256,53 @@ func _ship(side: int, size: float) -> MeshInstance3D:
 	return ship
 
 
-func _blast(at: Vector3, big: float, side: int) -> void:
-	var ball := SphereMesh.new()
-	ball.radius = 1.0
-	ball.height = 2.0
-	ball.radial_segments = 12
-	ball.rings = 6
+## A capital ship goes up: a white heart, a great ball of its side's light, and a ring that
+## runs out from it flat, far past the ball. Another ship comes for its place in a while.
+func _nova(capital: Dictionary) -> void:
+	var at: Vector3 = capital.node.position
+	capital.node.visible = false
+	capital.away = _rng.randf_range(14.0, 22.0)
+	_blast(at, 60.0, int(capital.side), 1.1, 1.0, false, Color.WHITE)
+	_blast(at, 150.0, int(capital.side), 2.6, 0.8)
+	_blast(at, 330.0, int(capital.side), 3.2, 0.7, true)
+
+
+func _blast(at: Vector3, big: float, side: int, life := 0.8, peak := 0.45, ring := false, tint := Color.TRANSPARENT) -> void:
+	var ball: PrimitiveMesh
+	if ring:
+		var hoop := TorusMesh.new()
+		hoop.inner_radius = 0.93
+		hoop.outer_radius = 1.0
+		hoop.rings = 48
+		hoop.ring_segments = 4
+		ball = hoop
+	else:
+		var round := SphereMesh.new()
+		round.radius = 1.0
+		round.height = 2.0
+		round.radial_segments = 16
+		round.rings = 8
+		ball = round
 	var material: StandardMaterial3D = _light[side].duplicate()
+	if tint.a > 0.0:
+		material.albedo_color = tint
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	var node := MeshInstance3D.new()
 	node.mesh = ball
 	node.material_override = material
 	node.position = at
+	if ring:
+		node.rotation = Vector3(_rng.randf_range(0.9, 1.5), _rng.randf() * TAU, 0.0)
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.extra_cull_margin = 3000.0
 	add_child(node)
-	_blasts.append({ node = node, material = material, age = 0.0, big = big })
+	_blasts.append({ node = node, material = material, age = 0.0, big = big, life = life, peak = peak })
 
 
 ## A Crystalien ship: a long cut crystal, nose along -Z, with two swept blades for wings and a
 ## fin, about 17 m long
-func _ship_mesh() -> ArrayMesh:
+static func ship_mesh() -> ArrayMesh:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	tool.set_smooth_group(-1)

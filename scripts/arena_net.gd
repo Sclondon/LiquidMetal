@@ -7,9 +7,10 @@ extends Node
 ## Text messages are JSON, both ways:
 ##   to the server:  join {name}  ·  take {e, d} (runner e ran over drop d)  ·  hit {a, v, how}
 ##     (my runner a burst runner v)  ·  died {e} (hit a wall)  ·  spawn {e} (back on its feet)
+##     ·  dash {e} (it dashed: that costs mass)
 ##   from it:  welcome {you, half, blocks, drops, ents, phase, ends}  ·  ent {...} / gone {id}
 ##     (someone in, out)  ·  bots {ids} (the bots this game runs)  ·  took {e, d, m}  ·
-##     drops {list}  ·  kill {a, v, am, how, lost, drops}  ·  alive {e, m}  ·  over {top, next}  ·
+##     mass {e, m} (it paid for a dash)  ·  drops {list}  ·  kill {a, v, am, how, lost, drops}  ·  alive {e, m}  ·  over {top, next}  ·
 ##     round {ends, drops, ents}
 ## Binary packets are runner states (player.gd's net_state: 11 bytes each after a kind byte),
 ## passed on by the server to everyone else as they are.

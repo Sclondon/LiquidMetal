@@ -11,6 +11,9 @@ var height := 2.8
 var _yaw := 0.0
 var _y := 0.0
 var _dash_fov := 0.0
+## 1 as he goes through a boost ring, easing off: the view opens wide (main.gd sets it)
+var rush := 0.0
+var _rush_fov := 0.0
 var _orbit := 0.0 # radians the right stick has swung it round him (any amount: it goes all the way round)
 var _orbit_speed := 0.0 # eased, so it spins up and settles
 var _pitch := 0.0 # -1 (down low) .. 1 (up over him), eased
@@ -54,7 +57,7 @@ func _process(delta: float) -> void:
 	if target == null:
 		return
 	var at: Vector3 = target.get_global_transform_interpolated().origin
-	_zoom = lerpf(_zoom, target.size if "size" in target else 1.0, 1.0 - exp(-delta * 3.0))
+	_zoom = lerpf(_zoom, pow(target.size, 0.55) if "size" in target else 1.0, 1.0 - exp(-delta * 3.0)) # (not all the way back: he has to look bigger)
 	_yaw = lerp_angle(_yaw, target.heading, 1.0 - exp(-delta * 5.0))
 	# The right stick orbits the camera round him (on round for as long as it's held) and up or
 	# down; let go and, after a moment, it swings back behind the shorter way
@@ -97,3 +100,6 @@ func _process(delta: float) -> void:
 		v_offset = cos(Time.get_ticks_msec() * 0.11) * 0.09 * _jolt
 	_dash_fov = lerpf(_dash_fov, 20.0 if dashing else 0.0, 1.0 - exp(-get_process_delta_time() * 12.0))
 	fov += _dash_fov
+	rush = move_toward(rush, 0.0, get_process_delta_time() * 0.7)
+	_rush_fov = lerpf(_rush_fov, 18.0 * smoothstep(0.0, 0.5, rush), 1.0 - exp(-get_process_delta_time() * 9.0))
+	fov += _rush_fov

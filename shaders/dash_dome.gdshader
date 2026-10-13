@@ -1,7 +1,7 @@
 shader_type canvas_item;
-// The DASH button: a half-round of liquid metal standing on the bottom edge of the screen, as
-// wide as the screen. Drawn on a rectangle: the dome is the half-ellipse that fills it. It's a
-// bead of mercury: its swell mirrors a painted sky (dark above, a bright band at the horizon, a
+// The DASH button: a half-round of liquid metal standing on the bottom edge of the screen, see-
+// through, with an arrow on it (two chevrons, pointing on). Drawn on a rectangle: the dome is
+// the half-ellipse that fills it. It's a bead of mercury: its swell mirrors a painted sky (dark above, a bright band at the horizon, a
 // dark floor), slow waves run over it, and its rim catches the light.
 //   ready: 1 when a dash is to be had, 0 just after one (it goes dull and comes back up)
 //   press: 1 as it's pressed, easing off (a ring runs out from the middle and it flares)
@@ -9,6 +9,7 @@ shader_type canvas_item;
 uniform float ready : hint_range(0.0, 1.0) = 1.0;
 uniform float press : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 glint : source_color = vec3(0.85, 0.92, 1.0);
+uniform float aspect = 3.0; // half its width over its height (so the arrow's drawn square)
 
 void fragment() {
 	// x: -1 .. 1 across it; y: 0 at the bottom edge .. 1 at its crown
@@ -33,5 +34,17 @@ void fragment() {
 	metal *= mix(0.4, 1.0, ready);
 	metal += glint * press * 0.45;
 	float inside = 1.0 - smoothstep(0.985, 1.0, sqrt(r2));
-	COLOR = vec4(metal, inside * mix(0.7, 0.94, ready));
+	// See-through: mostly its glints and its rim show; what's behind it shows through the rest
+	float bright = max(max(metal.r, metal.g), metal.b);
+	float alpha = mix(0.14, 0.3, ready) + 0.35 * smoothstep(0.45, 1.0, bright) + rim * 0.2;
+	// The arrow: two chevrons, one over the other
+	vec2 q = vec2(p.x * aspect, p.y);
+	float arrow = 0.0;
+	for (int k = 0; k < 2; k++) {
+		float d = abs(q.y - (0.72 - float(k) * 0.24) + abs(q.x) * 0.8);
+		arrow = max(arrow, (1.0 - smoothstep(0.035, 0.06, d)) * (1.0 - smoothstep(0.3, 0.33, abs(q.x))));
+	}
+	metal = mix(metal, vec3(1.0), arrow * mix(0.5, 1.0, ready));
+	alpha = max(alpha, arrow * mix(0.45, 0.95, ready));
+	COLOR = vec4(metal, inside * min(alpha + press * 0.25, 1.0));
 }

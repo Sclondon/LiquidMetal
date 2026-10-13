@@ -220,6 +220,11 @@ func _on_message(m: Dictionary) -> void:
 				_apply_mass(r)
 				if r.mine and not r.body.dead:
 					r.body.collect_drop()
+		"mass":
+			var r := _r(m.e)
+			if not r.is_empty():
+				r.mass = int(m.m)
+				_apply_mass(r)
 		"drops":
 			_add_drops(m.list)
 		"kill":
@@ -519,6 +524,11 @@ func _physics_process(delta: float) -> void:
 			continue
 		if phase != "play":
 			continue
+		# A dash is paid for in mass (the room takes it)
+		var dashing: bool = body.is_dashing()
+		if dashing and not r.get("dashing", false):
+			_room.send({ t = "dash", e = r.id })
+		r.dashing = dashing
 		_try_drops(r)
 		if r.safe <= 0.0 and r.wait <= 0.0:
 			_try_hits(r)
@@ -583,7 +593,7 @@ func _apply_mass(r: Dictionary) -> void:
 	if not is_instance_valid(r.body):
 		return
 	var grown := 1.0 - exp(-maxf(r.mass - 10.0, 0.0) / 120.0)
-	r.body.set_size(1.0 + 0.9 * grown)
+	r.body.set_size(1.0 + 3.0 * grown) # (10: his own size; 100: twice it; a few hundred: a giant)
 	if r.mine:
 		r.body.run_speed = BASE_SPEED * lerpf(1.0, 0.86, grown) * (0.94 if r.bot else 1.0)
 	if r.id == me:
@@ -662,6 +672,11 @@ func _lay_out(m: Dictionary, rise := true) -> void:
 		pad.position = Vector3(cos(angle), 0.0, sin(angle)) * half * 0.55
 		pad.rotation.y = -angle + PI / 2.0 # (boosting round the arena)
 		pad.collision_mask = 1 | 2 # (the room's runners are all on layer 2)
+		# (used, it's gone, and opens again somewhere else round the arena)
+		pad.respawn = func(ring: Node3D):
+			var at := randf() * TAU
+			ring.position = Vector3(cos(at), 0.0, sin(at)) * half * randf_range(0.4, 0.7)
+			ring.rotation.y = -at + PI / 2.0
 		add_child(pad)
 
 

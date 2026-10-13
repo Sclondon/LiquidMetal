@@ -80,8 +80,8 @@ func _process(delta: float) -> bool:
 	var best_start := 0.0
 	for horizon in [75.0, 55.0, 38.0, 24.0]:
 		for start in [0.0, 12.0, 24.0]:
-			for k in 51:
-				var to: float = -25.0 + k
+			for k in int(course.HALF * 2.0) - 5:
+				var to: float = -course.HALF + 3.0 + k
 				var cost: float = absf(to - x) + start * 0.2 + absf(to) * 0.03 + (0.0 if absf(to - goal_x) < 0.6 else 1.5)
 				if cost < best_cost and _clear(course.plan, x, z, to, start, horizon):
 					best_cost = cost

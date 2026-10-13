@@ -18,6 +18,9 @@ extends Node3D
 ## - Crystals that come down ahead of the runner and stay where they land (crystal_fall.gd;
 ##   `falling_crystals` switches them off): shards, great boulders, long bars that land flat
 ##   across the way, whole rows of shards. The ships of the war overhead loose them (war.gd).
+## - The war itself: a fighter shot down comes through the ring and leaves a hole where it hit
+##   (`blow_hole`), and a capital ship's big gun rakes a line down the ring or picks the runner
+##   out (beam_strike.gd): the line shows on the sand first.
 ## - Crystalien runners: each comes at him head on down the ring first, and, if it gets by,
 ##   comes round and chases (ai_input.gd `head_on`).
 ## - Drops to collect, and boost rings of aurora light (boost_pad.gd).
@@ -70,6 +73,8 @@ const BoostPad := preload("res://scripts/boost_pad.gd")
 const Crystal := preload("res://scripts/crystal.gd")
 const CrystalFall := preload("res://scripts/crystal_fall.gd")
 const War := preload("res://scripts/war.gd")
+const BeamStrike := preload("res://scripts/beam_strike.gd")
+const BEAMS_FROM := 350.0 # metres in before the big guns turn on the ring
 const STRAFE_LEAD := 2.0 # seconds before crystals fall that the ship loosing them shows up
 const Runner := preload("res://scripts/player.gd")
 const AiInput := preload("res://scripts/ai_input.gd")
@@ -115,6 +120,9 @@ var crystals_sent := 0
 var _jolt := 0.0
 var _war: Node3D # the ships overhead (war.gd)
 var _striker: Node3D # the one coming in to loose the next crystals
+var _beam_clock := 9.0
+## How many times a capital ship has fired on the ring this run
+var beams_sent := 0
 
 
 func _ready() -> void:
@@ -161,6 +169,8 @@ func generate(seed := 0) -> void:
 	_last_free = [[-HALF, HALF]]
 	_fall_clock = 6.0
 	crystals_sent = 0
+	_beam_clock = 9.0
+	beams_sent = 0
 	_extend()
 
 
@@ -213,6 +223,10 @@ func _physics_process(delta: float) -> void:
 			_striker = _war.strafe(maxf(_fall_clock, 0.0)) # (a ship comes down the ring to loose them)
 		if _fall_clock <= 0.0:
 			_send_crystals()
+		if distance() > BEAMS_FROM:
+			_beam_clock -= delta
+			if _beam_clock <= 0.0:
+				_send_beam()
 	# Clear what's well behind
 	while not _chunks.is_empty() and _chunks[0].keep > runner.global_position.z + BEHIND:
 		_chunks.pop_front().node.queue_free()
@@ -304,13 +318,13 @@ func _design(kind: String, speed: float) -> Array:
 	var crack := clampf(speed * 0.33, 4.5, 7.5) # (a jump covers about 0.65 of his speed)
 	match kind:
 		"ridge": # a low jagged ridge: jump it (or, where it stops short, go round)
-			var span := _span(22.0, 40.0, 0.5)
+			var span := _span(16.0, 30.0, 0.5)
 			pieces.append(_piece("ridge", "jump", 0.0, 0.5, span.x, span.y, 0.8))
 		"curtain": # a beam of crystal across, hung between two posts: slide under it
-			var span := _span(22.0, 40.0, 0.5)
+			var span := _span(16.0, 30.0, 0.5)
 			pieces.append(_piece("curtain", "duck", 0.0, 0.8, span.x, span.y, 2.3))
 		"tunnel": # a low roof to slide the length of
-			var span := _span(24.0, 40.0, 0.4)
+			var span := _span(18.0, 30.0, 0.4)
 			pieces.append(_piece("curtain", "duck", 0.0, TUNNEL, span.x, span.y, 2.3))
 		"wall": # stretches of tall crystal, one to a third of the ring: round them
 			var third := WIDTH / 3.0
@@ -319,7 +333,7 @@ func _design(kind: String, speed: float) -> Array:
 				stands[_rng.randi() % 3] = true
 			for k in 3:
 				if stands[k]:
-					var wide := _rng.randf_range(8.0, 13.0)
+					var wide := _rng.randf_range(6.0, 9.0)
 					var x := -HALF + third * k + _rng.randf_range(2.0, third - wide - 2.0)
 					var on := _rng.randf_range(0.0, 8.0)
 					pieces.append(_piece("wall", "avoid", on, on + 1.2, x, x + wide, _rng.randf_range(3.2, 4.6)))
@@ -328,7 +342,7 @@ func _design(kind: String, speed: float) -> Array:
 			var each := WIDTH / ways
 			var x := -HALF
 			for k in ways:
-				var wide := _rng.randf_range(7.0, 9.0)
+				var wide := _rng.randf_range(6.0, 7.5)
 				var middle := -HALF + each * (k + _rng.randf_range(0.3, 0.7))
 				pieces.append(_piece("wall", "avoid", 0.0, 1.4, x, middle - wide * 0.5, 4.6))
 				x = middle + wide * 0.5
@@ -336,7 +350,7 @@ func _design(kind: String, speed: float) -> Array:
 		"spires": # a field of tall single crystals to weave through
 			var spots: Array[Vector2] = []
 			for tries in 60:
-				var spot := Vector2(_rng.randf_range(-HALF + 3.0, HALF - 3.0), _rng.randf_range(1.0, 33.0))
+				var spot := Vector2(_rng.randf_range(-HALF + 3.0, HALF - 3.0), _rng.randf_range(1.0, 38.0))
 				var clear := true
 				for other in spots:
 					if spot.distance_to(other) < 8.5:
@@ -361,14 +375,14 @@ func _design(kind: String, speed: float) -> Array:
 			else:
 				pieces.append(_piece("hole", "hole", 0.0, long, HALF - deep, HALF, 0.0))
 		"hole": # a hole in the middle: either side of it
-			var wide := _rng.randf_range(12.0, 22.0)
+			var wide := _rng.randf_range(10.0, 16.0)
 			var long := _rng.randf_range(12.0, 22.0)
 			var middle := _rng.randf_range(-1.0, 1.0) * (HALF - wide * 0.5 - 7.0)
 			pieces.append(_piece("hole", "hole", 0.0, long, middle - wide * 0.5, middle + wide * 0.5, 0.0))
 		"causeway": # both sides gone: a strip left to run along
-			var wide := _rng.randf_range(12.0, 15.0)
+			var wide := _rng.randf_range(11.0, 14.0)
 			var long := _rng.randf_range(26.0, 36.0)
-			var middle := _rng.randf_range(-12.0, 12.0)
+			var middle := _rng.randf_range(-7.0, 7.0)
 			pieces.append(_piece("hole", "hole", 0.0, long, -HALF, middle - wide * 0.5, 0.0))
 			pieces.append(_piece("hole", "hole", 0.0, long, middle + wide * 0.5, HALF, 0.0))
 		"split", "fork": # long breaks along the ring: two paths (a fork: three), each with its own things on it
@@ -376,13 +390,13 @@ func _design(kind: String, speed: float) -> Array:
 			var edges: Array[float] = [-HALF]
 			if kind == "split":
 				var wide := _rng.randf_range(5.0, 7.0)
-				var middle := _rng.randf_range(-8.0, 8.0)
+				var middle := _rng.randf_range(-5.0, 5.0)
 				pieces.append(_piece("hole", "hole", 0.0, long, middle - wide * 0.5, middle + wide * 0.5, 0.0))
 				edges.append_array([middle - wide * 0.5, middle + wide * 0.5])
 			else:
-				var wide := _rng.randf_range(4.5, 6.0)
-				var out := _rng.randf_range(8.0, 11.0)
-				var shift := _rng.randf_range(-3.0, 3.0)
+				var wide := _rng.randf_range(4.0, 5.0)
+				var out := _rng.randf_range(6.5, 8.0)
+				var shift := _rng.randf_range(-1.5, 1.5)
 				for side in [-1.0, 1.0]:
 					pieces.append(_piece("hole", "hole", 0.0, long, shift + side * out - wide * 0.5, shift + side * out + wide * 0.5, 0.0))
 					edges.append_array([shift + side * out - wide * 0.5, shift + side * out + wide * 0.5])
@@ -403,7 +417,7 @@ func _design(kind: String, speed: float) -> Array:
 							pieces.append(_piece("spire", "avoid", on - 0.9, on + 0.9, x - 0.9, x + 0.9, 6.0))
 					on += _rng.randf_range(24.0, 34.0)
 		"wallrun": # a tall palisade standing along the ring, made for running on
-			var x := _rng.randf_range(8.0, 19.0) * (-1.0 if _rng.randf() < 0.5 else 1.0)
+			var x := _rng.randf_range(6.0, HALF - 5.0) * (-1.0 if _rng.randf() < 0.5 else 1.0)
 			pieces.append(_piece("palisade", "avoid", 0.0, 40.0, x - 0.45, x + 0.45, 8.5))
 	return pieces
 
@@ -550,12 +564,12 @@ func _clear_at(x: float, z: float, room: float) -> bool:
 ## that he sees the mark and has to go round what lands
 func _send_crystals() -> void:
 	var hard := clampf(distance() / HARD_AT, 0.0, 1.0)
-	_fall_clock = lerpf(7.0, 2.6, hard) * float(Difficulty.tier().gap_scale) * _rng.randf_range(0.7, 1.3)
-	var count := 1
-	if zone >= 1 and _rng.randf() < 0.35:
-		count = 2
-	if zone >= 3 and _rng.randf() < 0.3:
-		count = 3
+	_fall_clock = lerpf(3.2, 1.3, hard) * float(Difficulty.tier().gap_scale) * _rng.randf_range(0.7, 1.3)
+	var count := 2 + _rng.randi() % 2
+	if zone >= 1 and _rng.randf() < 0.5:
+		count += 1
+	if zone >= 3 and _rng.randf() < 0.4:
+		count += 1
 	# What comes down: mostly shards; a boulder, a bar across the way, or (further in) a row
 	var kind := "shard"
 	var roll := _rng.randf()
@@ -565,8 +579,10 @@ func _send_crystals() -> void:
 		kind = "boulder"
 	elif roll < 0.52 and zone >= 1:
 		kind = "row"
+	elif roll > 0.86:
+		kind = "wreck" # (a fighter shot down: it comes through the ring)
 	if kind != "shard":
-		count = 4 if kind == "row" else 1
+		count = 3 if kind == "row" else 1
 	var side := -1.0 if _rng.randf() < 0.5 else 1.0
 	var warn := 1.6
 	var sent := false
@@ -579,9 +595,10 @@ func _send_crystals() -> void:
 		var spot: Vector3 = runner.global_position + going * lead
 		if kind == "row": # (strung across his way, a gap between each)
 			spot = runner.global_position + going * (warn + 1.1)
-			spot.x += (k - 1.5) * 9.5 * side + _rng.randf_range(-1.0, 1.0)
+			spot.x += (k - 1.0) * 10.5 * side + _rng.randf_range(-1.0, 1.0)
 		else:
-			spot.x += _rng.randf_range(-2.5, 2.5) + (k * _rng.randf_range(5.0, 10.0) * (-1.0 if _rng.randf() < 0.5 else 1.0))
+			spot.x += _rng.randf_range(-2.5, 2.5) + (k * _rng.randf_range(5.0, 9.0) * (-1.0 if _rng.randf() < 0.5 else 1.0))
+			spot.z -= k * _rng.randf_range(3.0, 9.0)
 		spot.y = 0.0
 		var what := "shard" if kind == "row" else kind
 		var half_wide: float = CrystalFall.spec(what).block.x * 0.5
@@ -590,7 +607,9 @@ func _send_crystals() -> void:
 			if _open_at(spot.x, spot.z, half_wide) and absf(spot.x) < HALF - half_wide - 1.2:
 				# (from the ship that's come for it, if it's still out ahead)
 				var from := Vector3.ZERO
-				if is_instance_valid(_striker) and _striker.global_position.z < spot.z - 40.0:
+				if what == "wreck": # (down out of the fight, from one side)
+					from = Vector3(side * _rng.randf_range(90.0, 130.0), _rng.randf_range(50.0, 70.0), -_rng.randf_range(30.0, 80.0))
+				elif is_instance_valid(_striker) and _striker.global_position.z < spot.z - 40.0:
 					from = _striker.global_position - spot
 				drop_crystal(spot, warn + (k * 0.16 if kind == "row" else 0.0), what, from)
 				sent = true
@@ -598,6 +617,84 @@ func _send_crystals() -> void:
 			spot.z -= 5.0
 	if not sent:
 		_fall_clock = 0.4 # (nowhere open just here: again in a moment)
+
+
+## A capital ship's big gun on the ring: a rake down it toward the runner, on about the line
+## he's running, or a shot at where he's about to be. The line's in the plan (something to be
+## off) until it's over.
+func _send_beam() -> void:
+	var hard := clampf(distance() / HARD_AT, 0.0, 1.0)
+	var ship: Node3D = _war.capital()
+	if ship == null:
+		_beam_clock = 3.0
+		return
+	_beam_clock = lerpf(16.0, 8.0, hard) * _rng.randf_range(0.8, 1.3)
+	var going: Vector3 = runner.velocity
+	going.y = 0.0
+	if going.length() < 4.0:
+		going = runner.forward() * 4.0
+	var beam := BeamStrike.new()
+	beam.ship = ship
+	beam.color = War.SIDES[1]
+	var here: Vector3 = runner.global_position
+	here.y = 0.0
+	if _rng.randf() < 0.55:
+		# A rake: it lands well down the ring and runs back up it at him
+		beam.warn = 1.5
+		beam.sweep = 1.1
+		beam.radius = 1.7
+		var near: Vector3 = here + going * beam.warn * 0.6
+		beam.from = near + Vector3(_rng.randf_range(-1.5, 1.5), 0.0, -60.0)
+		beam.to = near + Vector3(_rng.randf_range(-1.0, 1.0), 0.0, 0.0)
+	else:
+		# At him: where he'll be, if he keeps on as he is
+		beam.warn = 1.3
+		beam.sweep = 0.45
+		beam.radius = 2.6
+		var spot: Vector3 = here + going * (beam.warn + 0.2)
+		beam.from = spot + Vector3(0.0, 0.0, 3.0)
+		beam.to = spot + Vector3(0.0, 0.0, -3.0)
+	beam.from.x = clampf(beam.from.x, -HALF + 1.0, HALF - 1.0)
+	beam.to.x = clampf(beam.to.x, -HALF + 1.0, HALF - 1.0)
+	# Only where he can get off the line: open ring beside it, all the way from where he is
+	if not _room_beside(minf(beam.from.x, beam.to.x) - beam.radius, maxf(beam.from.x, beam.to.x) + beam.radius, here.z, minf(beam.from.z, beam.to.z)):
+		beam.free()
+		_beam_clock = 1.0
+		return
+	beam.strike = func(spot: Vector3, radius: float):
+		var under: Array = enemies.duplicate()
+		under.append(runner)
+		for body in under:
+			if is_instance_valid(body) and not body.dead and body.global_position.y < 3.5 and Vector2(body.global_position.x - spot.x, body.global_position.z - spot.z).length() < radius:
+				body._splat()
+		_jolt = maxf(_jolt, 0.12)
+	add_child(beam)
+	beams_sent += 1
+	_id += 1
+	var line := { id = _id, kind = "beam", act = "avoid", z0 = maxf(beam.from.z, beam.to.z) + 2.0, z1 = minf(beam.from.z, beam.to.z) - 2.0, x0 = minf(beam.from.x, beam.to.x) - beam.radius, x1 = maxf(beam.from.x, beam.to.x) + beam.radius }
+	var at := plan.size()
+	while at > 0 and plan[at - 1].z0 < line.z0:
+		at -= 1
+	plan.insert(at, line)
+	beam.over.connect(func(): plan.erase(line))
+
+
+## Is there open ring to step onto on one side or the other of the strip x0..x1, all the way
+## along it from z_near to z_far (nothing tall, no break)?
+func _room_beside(x0: float, x1: float, z_near: float, z_far: float) -> bool:
+	for strip in [[x0 - 7.0, x0 - 0.5], [x1 + 0.5, x1 + 7.0]]:
+		var lo: float = strip[0]
+		var hi: float = strip[1]
+		if lo < -HALF + 1.0 or hi > HALF - 1.0:
+			continue
+		var open := true
+		for thing in plan:
+			if (thing.act == "avoid" or thing.act == "hole") and thing.z1 < z_near + 4.0 and thing.z0 > z_far - 4.0 and thing.x1 > lo and thing.x0 < hi:
+				open = false
+				break
+		if open:
+			return true
+	return false
 
 
 ## Open ring for a crystal to land on: floor, no other crystal within 8 m, and nothing laid
@@ -654,6 +751,10 @@ func drop_crystal(spot: Vector3, warn := 1.6, what := "shard", from := Vector3.Z
 func _on_struck(fall: Node3D) -> void:
 	var spot := fall.global_position
 	fall.get_meta("plan").kind = "fallen"
+	if fall.kind == "wreck":
+		var half: Vector3 = fall.block * 0.5
+		fall.get_meta("plan").kind = "crater"
+		blow_hole(spot.x - half.x, spot.x + half.x, spot.z + half.z, spot.z - half.z)
 	# Anyone under it
 	var under: Array = enemies.duplicate()
 	under.append(runner)
@@ -703,10 +804,30 @@ func _away(x: float, spans: Array) -> float:
 	return best
 
 
+## A hole blown in the ring where there was floor (a fighter coming down through it): the floor
+## of every stretch it touches is made again without it, and it's in the plan as a break
+func blow_hole(x0: float, x1: float, z0: float, z1: float) -> void:
+	_holes.append({ z0 = z0, z1 = z1, x0 = x0, x1 = x1 })
+	_holes.sort_custom(func(a, b): return a.z0 > b.z0) # (kept nearest first, like the plan)
+	for chunk in _chunks:
+		if z1 < chunk.from and z0 > chunk.end:
+			_build_floor(chunk.node, chunk.from, chunk.end)
+
+
+## A chunk's floor, made (or made again: what was there goes)
+func _build_floor(node: Node3D, from: float, to: float) -> void:
+	for old in node.get_meta("floor", []):
+		if is_instance_valid(old):
+			old.queue_free()
+	var before := node.get_child_count()
+	_lay_floor(node, from, to)
+	node.set_meta("floor", node.get_children().slice(before))
+
+
 ## A chunk's floor: the ring from `from` to `to` less its breaks, as pieces. Each piece is a
 ## box to stand on and a slab of sand to see; along every edge with nothing beyond it (the
 ## ring's two edges, and round each break) runs a low kerb of crystal, drawn only.
-func _build_floor(node: Node3D, from: float, to: float) -> void:
+func _lay_floor(node: Node3D, from: float, to: float) -> void:
 	var cuts: Array[float] = [from, to]
 	for hole in _holes:
 		for z in [hole.z0, hole.z1]:

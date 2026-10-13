@@ -7,7 +7,8 @@ extends Node3D
 ## was under it and jolts the camera.
 ## `kind` (set before it's in the tree): "shard", the plain one; "boulder", a great lump of
 ## crystals grown together, much more to go round; "bar", a long one that comes down flat across
-## the way, low enough to jump. `from`, if set, is where it comes from (a ship's gun: war.gd).
+## the way, low enough to jump; "wreck", not a crystal at all but a fighter shot down, which
+## stops nothing: it goes through the ring and leaves a hole (the course makes the hole). `from`, if set, is where it comes from (a ship's gun: war.gd).
 
 signal struck(crystal: Node3D)
 
@@ -81,6 +82,8 @@ func _ready() -> void:
 	_shard.mesh = _mesh()
 	_shard.material_override = material
 	_shard.basis = _along(Vector3(1.0, 0.06, 0.0)) if kind == "bar" else _along(_from)
+	if kind == "wreck": # (nose first down the line it falls along, spinning)
+		_shard.basis = Basis.looking_at(-_from.normalized(), Vector3.UP)
 	add_child(_shard)
 	# Its tail: a long thin shard of plain light behind it
 	var glow := StandardMaterial3D.new()
@@ -94,6 +97,9 @@ func _ready() -> void:
 	_shard.add_child(_tail)
 	_tail.position.y = 36.0
 	_tail.visible = kind != "bar" # (the bar comes down sideways on)
+	if kind == "wreck": # (its smoke of light streams out behind it)
+		_tail.rotation.x = PI * 0.5
+		_tail.position = Vector3(0.0, 0.0, 38.0)
 	# What it stops once it's down (a plain box: fair to run round)
 	var body := StaticBody3D.new()
 	var shape := BoxShape3D.new()
@@ -118,6 +124,8 @@ static func spec(of: String) -> Dictionary:
 			return { block = Vector3(5.6, 5.5, 5.6), reach = Vector2(4.0, 4.0), act = "avoid" }
 		"bar":
 			return { block = Vector3(10.0, 0.9, 1.3), reach = Vector2(5.6, 1.8), act = "jump" }
+		"wreck": # (block: the hole it leaves)
+			return { block = Vector3(7.0, 4.0, 7.0), reach = Vector2(4.2, 4.2), act = "hole" }
 	return { block = BLOCK, reach = Vector2(HIT, HIT), act = "avoid" }
 
 
@@ -136,6 +144,8 @@ func _mesh() -> ArrayMesh:
 			return tool.commit()
 		"bar":
 			return Crystal.shard(0.62, 11.0, 0.72)
+		"wreck":
+			return preload("res://scripts/war.gd").ship_mesh()
 	return Crystal.shard(RADIUS, LENGTH, 0.4)
 
 
@@ -150,6 +160,8 @@ func _place(done: float) -> void:
 	# (down the line; the point reaches the sand as the mark closes)
 	var up := _from.normalized()
 	_shard.position = _from * (1.0 - done) + (Vector3.UP * 0.5 if kind == "bar" else up * (LENGTH * 0.5))
+	if kind == "wreck":
+		_shard.rotate_object_local(Vector3.FORWARD, 0.12)
 	_mark_material.set_shader_parameter("closing", done)
 	_shaft_material.set_shader_parameter("closing", done)
 
@@ -173,7 +185,9 @@ func _land() -> void:
 		_shard.basis = _along(slant)
 		_shard.position = slant * (STANDS - LENGTH * 0.5)
 	_tail.visible = false
-	_collider.disabled = false
+	_collider.disabled = kind == "wreck" # (it's gone through: there's a hole there now)
+	_shard.visible = kind != "wreck"
+	_mark.visible = kind != "wreck"
 	_mark_material.set_shader_parameter("closing", 1.0)
 	_mark_material.set_shader_parameter("scorch", 1.0)
 	_shaft.visible = false

@@ -5,6 +5,7 @@ extends CanvasLayer
 ## plus restart / menu. The look is ui_theme.gd's: gel and chrome, the year 2001. In the arena the feel sliders and restart are put away: it's a shared room.
 
 const UI := preload("res://scripts/ui_theme.gd")
+const DASH_WIDE := 0.6 # how much of the screen's width the DASH dome takes
 
 var player: CharacterBody3D
 var cam: Camera3D
@@ -25,6 +26,9 @@ var _flash := ColorRect.new()
 var _dash := ColorRect.new() # the DASH dome
 var _dash_material := ShaderMaterial.new()
 var _dash_press := 0.0
+var _speed_lines := ColorRect.new() # streaks in from the edges of the screen after a boost
+var _speed_material := ShaderMaterial.new()
+var _rush := 0.0
 var _board := PanelContainer.new() # the arena's standings
 var _board_rows := VBoxContainer.new()
 var _feed := Label.new()
@@ -59,9 +63,9 @@ func _ready() -> void:
 	root.add_child(_stats_box)
 	set_stats("", "")
 	# The banner: zones, waves
-	_banner = UI.heading("", 60, UI.ORANGE)
+	_banner = UI.heading("", 34, UI.ORANGE)
 	_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 0)
-	_banner.offset_top = 150
+	_banner.offset_top = 118
 	_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_banner.modulate.a = 0.0
 	_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -93,13 +97,21 @@ func _ready() -> void:
 	_feed.modulate.a = 0.0
 	root.add_child(_feed)
 
-	# DASH: a half-round of liquid metal standing on the bottom edge, as wide as the screen
-	# (shaders/dash_dome.gdshader). Touches on it are the runner input's (any finger, while
+	_speed_lines.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_speed_lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_speed_material.shader = preload("res://shaders/speed_lines.gdshader")
+	_speed_lines.material = _speed_material
+	_speed_lines.visible = false
+	root.add_child(_speed_lines)
+	# DASH: a half-round of liquid metal standing on the middle of the bottom edge, see-through,
+	# an arrow on it (shaders/dash_dome.gdshader). Touches on it are the runner input's (any finger, while
 	# another steers); a mouse press is taken here.
 	_dash.color = Color.WHITE
 	_dash_material.shader = preload("res://shaders/dash_dome.gdshader")
 	_dash.material = _dash_material
 	_dash.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_dash.anchor_left = 0.5 - DASH_WIDE * 0.5
+	_dash.anchor_right = 0.5 + DASH_WIDE * 0.5
 	_dash.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_dash.mouse_filter = Control.MOUSE_FILTER_PASS
 	_dash.gui_input.connect(func(event: InputEvent):
@@ -109,12 +121,6 @@ func _ready() -> void:
 			if event.pressed:
 				player.input.dash.emit()
 	)
-	var dash_word := UI.heading("DASH", 30, UI.NAVY)
-	dash_word.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dash_word.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	dash_word.offset_top = 22
-	dash_word.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_dash.add_child(dash_word)
 	player.dashed.connect(func(): _dash_press = 1.0)
 	root.add_child(_dash)
 
@@ -185,6 +191,11 @@ func _slider(rows: VBoxContainer, title: String, low: float, high: float, step: 
 
 
 ## True when a screen point is on a button or the open panel (so it isn't a steer)
+## Through a boost ring: lines of speed, easing off
+func rush() -> void:
+	_rush = 1.0
+
+
 ## True when a screen point is on the DASH dome (the half-ellipse that fills its rectangle)
 func is_over_dash(point: Vector2) -> bool:
 	if not visible:
@@ -204,10 +215,14 @@ func is_over_ui(point: Vector2) -> bool:
 
 
 func _process(_delta: float) -> void:
-	# The dome: about a sixth of the screen high (a shallower arc on a wide screen than a tall one)
+	# The dome: about an eighth of the screen high (a shallower arc on a wide screen than a tall one)
 	var screen := get_viewport().get_visible_rect().size
-	var tall := clampf(screen.x * 0.5, 96.0, screen.y * 0.17)
+	var tall := clampf(screen.x * DASH_WIDE * 0.5, 80.0, screen.y * 0.125)
 	_dash.offset_top = -tall
+	_dash_material.set_shader_parameter("aspect", screen.x * DASH_WIDE * 0.5 / tall)
+	_rush = move_toward(_rush, 0.0, _delta * 0.8)
+	_speed_lines.visible = _rush > 0.0
+	_speed_material.set_shader_parameter("strength", smoothstep(0.0, 0.4, _rush))
 	_dash_press = move_toward(_dash_press, 0.0, _delta * 2.5)
 	_dash_material.set_shader_parameter("press", _dash_press)
 	_dash_material.set_shader_parameter("ready", 1.0 - clampf(player.dash_cooldown / 1.2, 0.0, 1.0))
@@ -279,7 +294,7 @@ func banner(text: String, sub := "") -> void:
 	_banner.text = text if sub == "" else "%s\n%s" % [text, sub]
 	_banner.pivot_offset = _banner.size * 0.5
 	var tween := create_tween()
-	_banner.scale = Vector2(1.4, 1.4)
+	_banner.scale = Vector2(1.2, 1.2)
 	tween.tween_property(_banner, "modulate:a", 1.0, 0.15)
 	tween.parallel().tween_property(_banner, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tween.tween_interval(1.4)

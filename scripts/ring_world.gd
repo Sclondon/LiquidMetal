@@ -14,7 +14,7 @@ extends Node3D
 ## same directions and colours shaders/sky.gdshader draws them with).
 
 const RADIUS := 1500.0 # the moon's middle to the middle of the runner's band
-const WIDTH := 56.0 # across the runner's band: all of it is the course
+const WIDTH := 40.0 # across the runner's band: all of it is the course
 const MOON := 1150.0 # the moon's radius
 const MOON_DROP := 150.0 # its middle sits this far below the runner's level
 const AIR := 1.04 # the haze layer's radius, times the moon's

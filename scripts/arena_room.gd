@@ -15,6 +15,8 @@ const PIT_RADIUS := 14.0
 const LAYOUT_TIME := 45.0 # seconds between changes of layout while a round's on
 const WARN_TIME := 3.5 # how long the games are told before one comes in
 const START_MASS := 10
+const DASH_COST := 0.08 # of a runner's mass, gone each time it dashes (at least 1)...
+const DASH_FLOOR := 5 # ...but a dash never takes it below this
 const SAFE := 2.5
 const DROPS := 110
 const OVER_TIME := 9.0
@@ -80,6 +82,12 @@ func send(m: Dictionary) -> void:
 			ent.mass += int(_drops[int(m.d)][2])
 			_drops.erase(int(m.d))
 			_out.append({ t = "took", e = ent.id, d = int(m.d), m = ent.mass })
+		"dash": # (a dash is paid for in mass)
+			var ent: Dictionary = _ents.get(int(m.e), {})
+			if ent.is_empty() or not ent.alive or _phase != "play" or ent.mass <= DASH_FLOOR:
+				return
+			ent.mass = maxi(ent.mass - maxi(int(ent.mass * DASH_COST), 1), DASH_FLOOR)
+			_out.append({ t = "mass", e = ent.id, m = ent.mass })
 		"hit":
 			var a: Dictionary = _ents.get(int(m.a), {})
 			var v: Dictionary = _ents.get(int(m.v), {})

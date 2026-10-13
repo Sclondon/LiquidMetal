@@ -107,7 +107,7 @@ func _process(delta: float) -> bool:
 				p.global_position.z -= 100.0
 			else:
 				# (it comes up behind him, in line with him: wherever across the ring there's room for it)
-				for x in [0.0, 14.0, -14.0, 22.0, -22.0, 7.0, -7.0]:
+				for x in [0.0, 10.0, -10.0, 16.0, -16.0, 5.0, -5.0, 13.0, -13.0]:
 					p.global_position = Vector3(x, 0.0, float(crack.get("z1", 0.0)) - 14.0)
 					main.area._physics_process(0.0)
 					main.area._spawn_enemy(float(crack.get("z0", 0.0)) + 16.0)

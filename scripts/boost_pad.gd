@@ -3,6 +3,8 @@ extends Area3D
 ## and are shot forward by (the runner's speed kicked up, easing back off). It stands on its
 ## position, facing +Z (its light streams back toward -Z, the way it boosts you, unless it's turned
 ## with rotation.y); `lift` raises it off the ground, for one to be jumped through.
+## It's good for one go: gone through, it closes up and is gone. If `respawn` is set (the arena)
+## it's called with the ring a few seconds later, to put it somewhere else, and it opens again.
 ## The light is two hoops of curtain, flaring out behind the opening and flowing opposite ways,
 ## and a thin veil across the opening (shaders/boost_pad.gdshader).
 
@@ -12,6 +14,11 @@ const FLARE := 1.3 # and how far out they spread as they go (so you see them fro
 
 ## Metres its foot is off the ground
 var lift := 0.0
+## Called with this ring once it's been used and has closed, to move it (it then opens again)
+var respawn: Callable
+const AWAY := 3.0 # seconds it's gone before it opens somewhere else
+
+var _used := false
 
 
 func _ready() -> void:
@@ -49,8 +56,20 @@ func _ready() -> void:
 	veil.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(veil)
 	body_entered.connect(func(body: Node3D):
-		if body.has_method("boost"):
-			body.boost()
+		if _used or not body.has_method("boost"):
+			return
+		body.boost()
+		_used = true
+		var tween := create_tween()
+		tween.tween_property(self, "scale", Vector3.ONE * 0.01, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		tween.tween_callback(func(): visible = false)
+		if respawn.is_valid():
+			tween.tween_interval(AWAY)
+			tween.tween_callback(func():
+				respawn.call(self)
+				visible = true)
+			tween.tween_property(self, "scale", Vector3.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			tween.tween_callback(func(): _used = false)
 	)
 
 
