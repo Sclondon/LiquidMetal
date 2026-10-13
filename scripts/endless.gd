@@ -1,6 +1,7 @@
 extends Node3D
-## Endless mode's course: a lane of Tron obstacles running off to the horizon along -Z, built a
-## chunk at a time ahead of the runner and cleared away behind. The obstacles come closer
+## Endless mode's course: the ring road round the Crystaliens' black sand moon (ring_world.gd
+## draws the ring and the moon). A lane of crystal obstacles runs off along -Z on top of the ring,
+## built a chunk at a time ahead of the runner and cleared away behind. The obstacles come closer
 ## together the further you get (main.gd speeds the runner up too). Walls line the lane.
 ## Same obstacle kinds and colours as the test area's practice lane; lane_plan lists what's
 ## been laid, in order (the endless bot test reads it).
@@ -16,11 +17,13 @@ const ZONE_KINDS := [[], ["zigzag"], ["tunnel"], ["pillars"]]
 const ZONE_LENGTH := 500.0
 ## Each zone's look: name, sky overhead, horizon glow, fog, the floor grid's lines
 const ZONES := [
-	{ name = "NEON DUSK", top = Color(0.04, 0.05, 0.16), horizon = Color(0.95, 0.5, 0.48), fog = Color(0.5, 0.3, 0.42), lines = Color(0.15, 0.45, 1.0) },
-	{ name = "TOXIC TIDE", top = Color(0.02, 0.08, 0.05), horizon = Color(0.55, 1.0, 0.35), fog = Color(0.25, 0.45, 0.2), lines = Color(0.3, 1.0, 0.35) },
-	{ name = "ICE CIRCUIT", top = Color(0.02, 0.06, 0.14), horizon = Color(0.6, 0.9, 1.0), fog = Color(0.35, 0.5, 0.65), lines = Color(0.5, 0.95, 1.0) },
-	{ name = "INFERNO", top = Color(0.12, 0.02, 0.02), horizon = Color(1.0, 0.45, 0.1), fog = Color(0.55, 0.22, 0.1), lines = Color(1.0, 0.35, 0.1) },
-	{ name = "THE VOID", top = Color(0.01, 0.0, 0.03), horizon = Color(0.6, 0.2, 1.0), fog = Color(0.2, 0.08, 0.3), lines = Color(0.75, 0.3, 1.0) },
+	# (out in space: black overhead, a thin glow along the horizon, fog that fades to the dark;
+	# lines: the zone's crystal colour, on the kerbs, the sand's glints and the moon's fields)
+	{ name = "AMETHYST REACH", top = Color(0.012, 0.008, 0.03), horizon = Color(0.6, 0.35, 1.0), fog = Color(0.03, 0.02, 0.07), lines = Color(0.65, 0.4, 1.0), space = 1.0 },
+	{ name = "EMERALD DRIFT", top = Color(0.006, 0.02, 0.016), horizon = Color(0.35, 1.0, 0.55), fog = Color(0.015, 0.05, 0.03), lines = Color(0.35, 1.0, 0.55), space = 1.0 },
+	{ name = "ICE ARC", top = Color(0.006, 0.014, 0.03), horizon = Color(0.55, 0.85, 1.0), fog = Color(0.02, 0.04, 0.07), lines = Color(0.5, 0.9, 1.0), space = 1.0 },
+	{ name = "EMBER ARC", top = Color(0.03, 0.008, 0.006), horizon = Color(1.0, 0.5, 0.2), fog = Color(0.07, 0.025, 0.015), lines = Color(1.0, 0.5, 0.2), space = 1.0 },
+	{ name = "THE DARK SIDE", top = Color(0.004, 0.0, 0.012), horizon = Color(0.8, 0.3, 0.9), fog = Color(0.03, 0.01, 0.05), lines = Color(0.9, 0.35, 0.8), space = 1.0 },
 ]
 
 signal zone_changed(index: int, zone: Dictionary)
@@ -31,13 +34,16 @@ const GAP_EASY := 28.0 # metres between obstacles at the start...
 const GAP_HARD := 18.0 # ...closing to this by HARD_AT metres in
 const HARD_AT := 2500.0
 const TUNNEL := 10.0 # metres of low roof
+const KERB := 1.1 # how high the lane's ordinary walls are drawn
 
-const JUMP_COLOR := Color(1.0, 0.5, 0.1)
-const DUCK_COLOR := Color(0.1, 0.85, 1.0)
-const DODGE_COLOR := Color(1.0, 0.2, 0.75)
-const WALL_COLOR := Color(0.45, 0.5, 0.6)
-const WALL_RUN_COLOR := Color(0.2, 1.0, 0.45) # the tall walls made for running on
+const JUMP_COLOR := Color(1.0, 0.65, 0.25)
+const DUCK_COLOR := Color(0.45, 0.85, 1.0)
+const DODGE_COLOR := Color(1.0, 0.4, 0.65)
+const WALL_COLOR := Color(0.4, 0.45, 0.6)
+const WALL_RUN_COLOR := Color(0.3, 0.95, 0.6) # the tall walls made for running on
 const BoostPad := preload("res://scripts/boost_pad.gd")
+const RingWorld := preload("res://scripts/ring_world.gd")
+const Crystal := preload("res://scripts/crystal.gd")
 const Runner := preload("res://scripts/player.gd")
 const AiInput := preload("res://scripts/ai_input.gd")
 const Difficulty := preload("res://scripts/difficulty.gd")
@@ -58,6 +64,9 @@ var _last_kind := ""
 var _rng := RandomNumberGenerator.new()
 var _materials := {}
 var _floor: StaticBody3D
+var _ring: Node3D # the ring road and the moon (ring_world.gd)
+var _scenery_meshes: Array[ArrayMesh] = []
+var _looks := RandomNumberGenerator.new() # (the scenery's own dice: the course's stay as they were)
 var _drop_mesh := SphereMesh.new()
 
 
@@ -68,6 +77,10 @@ func _ready() -> void:
 	drop_material.shader = preload("res://shaders/liquid_metal.gdshader")
 	drop_material.set_shader_parameter("agitation", 0.6)
 	_drop_mesh.material = drop_material
+	for k in 4:
+		_scenery_meshes.append(Crystal.shard(1.0, 3.0 + k * 1.5, 0.35 + 0.1 * k))
+	_ring = RingWorld.new()
+	add_child(_ring)
 	_build_floor()
 	generate()
 
@@ -79,8 +92,7 @@ func generate(seed := 0) -> void:
 	_chunks.clear()
 	lane_plan.clear()
 	zone = 0
-	if _floor_material:
-		_floor_material.set_shader_parameter("line_color", ZONES[0].lines)
+	_ring.set_color(ZONES[0].lines)
 	if seed == 0:
 		_rng.randomize()
 	else:
@@ -106,7 +118,7 @@ func _physics_process(_delta: float) -> void:
 		if now != zone:
 			zone = now
 			var look: Dictionary = ZONES[zone % ZONES.size()]
-			create_tween().tween_property(_floor_material, "shader_parameter/line_color", look.lines, 2.0)
+			_ring.set_color(look.lines)
 			zone_changed.emit(zone, look)
 	if runner and with_enemies and distance() > 60.0 and enemies.size() < int(Difficulty.tier().endless_enemies) and _rng.randf() < _delta * float(Difficulty.tier().endless_rate):
 		_spawn_enemy(runner.global_position.z + _rng.randf_range(22.0, 34.0)) # behind him: they chase
@@ -115,6 +127,7 @@ func _physics_process(_delta: float) -> void:
 	_extend()
 	# The floor goes along with the runner (its grid is drawn in world space, so it doesn't slide)
 	_floor.global_position.z = snappedf(runner.global_position.z, 20.0)
+	_ring.follow(runner.global_position.z)
 	# Enemies: gone once well behind (or a while after blowing up); a new one now and then ahead
 	for i in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[i]
@@ -140,12 +153,27 @@ func _build_chunk(from: float, to: float) -> void:
 	var node := Node3D.new()
 	add_child(node)
 	_chunks.append({ end = to, node = node })
+	# Crystals growing out of the sand either side of the lane
+	var crystal_color: Color = ZONES[int(maxf(start_position.z - from, 0.0) / ZONE_LENGTH) % ZONES.size()].lines
+	for k in 7:
+		var crystal := MeshInstance3D.new()
+		crystal.mesh = _scenery_meshes[_looks.randi() % _scenery_meshes.size()]
+		var side := -1.0 if k % 2 == 0 else 1.0
+		var grown := _looks.randf_range(0.6, 2.2)
+		crystal.position = Vector3(side * _looks.randf_range(9.0, 36.0), grown * 0.8, _looks.randf_range(to, from))
+		crystal.rotation = Vector3(_looks.randf_range(-0.35, 0.35), _looks.randf() * TAU, _looks.randf_range(-0.35, 0.35))
+		crystal.scale = Vector3.ONE * grown
+		crystal.material_override = _crystal_material(crystal_color.lerp(Color.WHITE, _looks.randf() * 0.3))
+		crystal.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		node.add_child(crystal)
 	# Walls down both sides (tall enough to wall-run along); now and then a stretch of taller,
 	# green ones, made for it, with a line of drops along one up where only a wall run reaches
 	var tall := from < start_position.z - RUNWAY and _rng.randf() < 0.35
 	for side in [-1.0, 1.0]:
 		var height := 8.0 if tall else 4.5
-		_block(node, Vector3(0.6, height, CHUNK), Vector3(side * (WIDTH * 0.5 + 0.3), height * 0.5, (from + to) * 0.5), WALL_RUN_COLOR if tall else WALL_COLOR)
+		# (the ordinary ones are only a low kerb of crystal to look at, so the moon and the ring show
+		# over them; they still hold him in the lane as high as before)
+		_block(node, Vector3(0.6, height, CHUNK), Vector3(side * (WIDTH * 0.5 + 0.3), height * 0.5, (from + to) * 0.5), WALL_RUN_COLOR if tall else WALL_COLOR, height if tall else KERB)
 	if tall:
 		var side := -1.0 if _rng.randf() < 0.5 else 1.0
 		for k in 8:
@@ -260,7 +288,19 @@ func _material(color: Color) -> ShaderMaterial:
 	return _materials[color]
 
 
-func _block(node: Node3D, size: Vector3, center: Vector3, color: Color) -> void:
+func _crystal_material(color: Color) -> ShaderMaterial:
+	var key := "crystal %s" % color.to_html()
+	if not _materials.has(key):
+		var material := ShaderMaterial.new()
+		material.shader = preload("res://shaders/crystal.gdshader")
+		material.set_shader_parameter("horizon", color)
+		material.set_shader_parameter("sky_top", color.darkened(0.7))
+		_materials[key] = material
+	return _materials[key]
+
+
+## seen: how much of its height is drawn, from the ground up (0: all of it)
+func _block(node: Node3D, size: Vector3, center: Vector3, color: Color, seen := 0.0) -> void:
 	var body := StaticBody3D.new()
 	body.position = center
 	var shape := BoxShape3D.new()
@@ -271,6 +311,9 @@ func _block(node: Node3D, size: Vector3, center: Vector3, color: Color) -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = size
 	var view := MeshInstance3D.new()
+	if seen > 0.0 and seen < size.y:
+		mesh.size.y = seen
+		view.position.y = (seen - size.y) * 0.5
 	view.mesh = mesh
 	view.material_override = _material(color)
 	body.add_child(view)
@@ -310,9 +353,10 @@ func _build_floor() -> void:
 	var view := MeshInstance3D.new()
 	view.mesh = plane
 	var material := ShaderMaterial.new()
-	material.shader = preload("res://shaders/grid_floor.gdshader")
+	material.shader = preload("res://shaders/black_sand.gdshader")
 	view.material_override = material
 	_floor_material = material
+	view.visible = false # (the ring road draws the ground: ring_world.gd)
 	_floor.add_child(view)
 	add_child(_floor)
 	# The lane's edges, glowing strips along the foot of the walls
@@ -326,4 +370,5 @@ func _build_floor() -> void:
 		glow.albedo_color = Color(0.6, 0.85, 1.0)
 		strip.material_override = glow
 		strip.position = Vector3(side * WIDTH * 0.5, 0.012, 0.0)
+		strip.visible = false
 		_floor.add_child(strip)

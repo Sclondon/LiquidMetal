@@ -10,6 +10,12 @@ uniform vec3 ground_color : source_color = vec3(0.015, 0.015, 0.03);
 uniform vec3 sun_dir = vec3(0.0, 0.07, -1.0); // the sun's direction from the eye: low, down the lane (-Z)
 uniform float sun_size = 0.16; // its radius (radians, roughly)
 uniform float star_amount = 1.0;
+uniform float skyline = 1.0; // the towers and hills along the horizon (0: none)
+// Out in space (the Crystaliens' moon and the ring road round it): stars all the way down, no
+// ground below the horizon, and with ring > 0 the moon's ring arching over, edge on
+uniform float space = 0.0;
+uniform float ring = 0.0;
+uniform vec3 ring_axis = vec3(0.25, 0.45, 0.86); // the ring's plane, by the line through its middle
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -29,10 +35,12 @@ void sky() {
 	// The gradient, with a hot haze hugging the horizon
 	vec3 col = mix(horizon, sky_top, pow(smoothstep(-0.02, 0.6, y), 0.55));
 	col += horizon * exp(-abs(y) * 22.0) * 0.45;
+	// (in space the sky's black nearly to the horizon: only a thin glow along it)
+	col = mix(col, sky_top + horizon * exp(-abs(y) * 16.0) * 0.3, space);
 
 	// Stars, fading out toward the horizon's glow
 	vec2 cell = floor(vec2(az * 260.0 / 3.1416, y * 260.0));
-	float star = step(0.9965, hash(cell)) * smoothstep(0.12, 0.45, y);
+	float star = step(0.9965, hash(cell)) * mix(smoothstep(0.12, 0.45, y), 1.0, space);
 	col += vec3(0.85, 0.9, 1.0) * star * (0.4 + 0.6 * hash(cell + 7.0)) * star_amount;
 
 	// The sun: a soft glow all round it, the disc warm at the top and the horizon's colour below,
@@ -40,7 +48,11 @@ void sky() {
 	vec3 sd = normalize(sun_dir);
 	float s = acos(clamp(dot(d, sd), -1.0, 1.0));
 	col += horizon * (exp(-s * 5.0) * 0.55 + exp(-s * 18.0) * 0.5);
-	if (s < sun_size) {
+	// (out in space it's a plain small star, not the striped sun)
+	float size = sun_size * mix(1.0, 0.4, space);
+	if (s < size && space > 0.5) {
+		col = mix(col, mix(horizon, vec3(1.0, 0.97, 0.9), 0.8) * 2.2, smoothstep(size, size * 0.9, s));
+	} else if (s < sun_size && space < 0.5) {
 		float v = clamp((y - (sd.y - sun_size)) / (2.0 * sun_size), 0.0, 1.0); // 0 at its foot, 1 at its top
 		vec3 disc = mix(horizon * 1.4, vec3(1.0, 0.9, 0.55) * 1.8, v);
 		float band = step(fract(v * 9.0), mix(0.55, 0.05, v)) * step(v, 0.55);
@@ -55,7 +67,7 @@ void sky() {
 	tower *= 1.0 - smoothstep(0.6, 1.4, abs(az)); // the city off to either side of the sun, not in front of it
 	tower = max(tower, step(0.8, hash(vec2(block, 5.0))) * 0.02 * smoothstep(1.2, 2.2, abs(az)));
 	float ridge = max(hills, hills + tower * (1.0 - smoothstep(2.6, 3.0, abs(az))));
-	if (y > -0.01 && y < ridge) {
+	if (y > -0.01 && y < ridge && skyline > 0.5) {
 		float depth = clamp((ridge - y) / 0.03, 0.0, 1.0);
 		vec3 silhouette = mix(horizon * 0.35, sky_top * 0.6 + ground_color, depth);
 		// Lit windows on the towers
@@ -68,8 +80,15 @@ void sky() {
 	}
 
 	// Below the horizon: the dark ground, a little of the haze reflected in it
-	if (y < -0.01) {
+	if (y < -0.01 && space < 0.5) {
 		col = mix(ground_color + horizon * 0.12, ground_color, smoothstep(-0.01, -0.25, y));
+	}
+	// The ring: a band of bright lanes with dark gaps between, seen from down on the moon
+	if (ring > 0.0) {
+		float off = dot(d, normalize(ring_axis)); // how far off the ring's plane this way looks
+		float band = smoothstep(0.075, 0.06, abs(off));
+		float lanes = 0.35 + 0.65 * noise1(off * 260.0 + 40.0) * step(0.25, noise1(off * 90.0));
+		col += mix(horizon, vec3(1.0), 0.45) * band * lanes * ring * 0.55;
 	}
 	COLOR = col;
 }

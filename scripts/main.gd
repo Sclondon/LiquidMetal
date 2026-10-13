@@ -34,6 +34,8 @@ const ENDLESS_FAST := 3000.0
 @export var enemies := true
 ## The arena's rounds, in seconds, when the room's run here (0: the usual; a test's are short)
 @export var arena_round := 0.0
+## The arena's first layout when the room's run here ("": any): "open" / "blocks" / "movers" / "pit"
+@export var arena_mode := ""
 var mode := ""
 
 var area: Node3D
@@ -166,8 +168,11 @@ func start_endless() -> void:
 	player.rewind_on_splat = false
 	player.run_speed = Difficulty.tier().endless_speed.x
 	_play()
+	# (the moon and the far side of the ring are a long way off)
+	cam.far = 6000.0
+	_environment.fog_density = 0.0016
 	_set_sky(Endless.ZONES[0], 0.0)
-	hud.banner("ENDLESS", Endless.ZONES[0].name)
+	hud.banner("THE RING ROAD", Endless.ZONES[0].name)
 
 
 ## Arena: the online battle room (or, when the server can't be had, the same room with bots)
@@ -178,6 +183,7 @@ func start_arena() -> void:
 	course.with_enemies = enemies
 	course.player_name = Flags.value("name", _name)
 	course.round_time = arena_round
+	course.first_mode = arena_mode
 	# (the tests start straight in: they play a room run here unless told a server)
 	if not Flags.all().has("offline"):
 		course.server = Flags.value("server", ARENA_SERVER if start_mode == "menu" else "")
@@ -191,7 +197,8 @@ func start_arena() -> void:
 	player.run_speed = ARENA_SPEED
 	_play()
 	player.set_physics_process(false) # (the arena lets him go once he's in the room)
-	_set_sky({ top = Color(0.02, 0.06, 0.04), horizon = Color(0.4, 1.0, 0.6), fog = Color(0.2, 0.35, 0.25) }, 0.0)
+	# The Crystaliens' moon: black sky, stars all the way down, its ring overhead
+	_set_sky({ top = Color(0.012, 0.008, 0.03), horizon = Color(0.55, 0.3, 1.0), fog = Color(0.1, 0.06, 0.18), space = 1.0, ring = 1.0 }, 0.0)
 
 
 ## The title menu, over the runner standing at the start of the test area
@@ -281,6 +288,8 @@ func _play() -> void:
 	hud.visible = true
 	hud.enemies_switch.visible = mode == "test"
 	hud.set_arena(mode == "arena")
+	cam.far = 700.0
+	_environment.fog_density = 0.004
 	player.reset_drops()
 	_smashes = 0
 	player.place(area.start_position, area.start_heading)
@@ -332,6 +341,10 @@ func _set_sky(look: Dictionary, time: float) -> void:
 	if _sky == null:
 		return
 	var light: Color = (look.horizon as Color).lerp(Color.WHITE, 0.6) # the key light, warmed by the horizon
+	# (out in space: no skyline, stars below the horizon too, and maybe the ring)
+	_sky.set_shader_parameter("space", look.get("space", 0.0))
+	_sky.set_shader_parameter("skyline", 1.0 - float(look.get("space", 0.0)))
+	_sky.set_shader_parameter("ring", look.get("ring", 0.0))
 	if time <= 0.0:
 		_sky.set_shader_parameter("sky_top", look.top)
 		_sky.set_shader_parameter("horizon", look.horizon)

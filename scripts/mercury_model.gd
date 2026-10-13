@@ -19,6 +19,8 @@ const TOP_SPEED := 26.0
 const BLEND := 0.08 # seconds to blend between run and jump: snappy
 
 var material: Material
+## A Crystalien: the same skeleton and moves, a crystal in place of each part, no tube muscles
+var crystal := false
 
 var _model: Node3D
 var _parts: Array[Node3D] = []
@@ -132,6 +134,8 @@ func _ready() -> void:
 			view.material_override = eye_material
 			_eyes.append(view)
 			continue
+		if crystal:
+			view.mesh = preload("res://scripts/crystal.gd").part(view.mesh.get_aabb(), view.name)
 		var box: AABB = view.mesh.get_aabb()
 		var own: ShaderMaterial = material.duplicate()
 		own.set_shader_parameter("collapse_center", box.get_center())
@@ -574,7 +578,7 @@ func _draw_tubes() -> void:
 		_tube_view.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		add_child(_tube_view)
 	_tube_mesh.clear_surfaces()
-	_tube_view.visible = not _tubes_hidden
+	_tube_view.visible = not _tubes_hidden and not crystal
 	if _tubes_hidden or _tube_links.is_empty():
 		return
 	var scale_now := global_basis.get_scale().x * MODEL_SCALE

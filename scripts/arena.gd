@@ -1,9 +1,12 @@
 extends Node3D
-## Arena: an online battle room. Everyone who opens it drops into the same walled square and
+## Arena: an online battle room in the Crystaliens' colosseum (colosseum.gd: black sand, a round
+## wall, a crowd of them in the stands). Everyone who opens it drops into the same room and
 ## fights for the most mass before the round's clock runs out. Run over drops of metal to grow;
 ## dash through another runner to burst it (or just run into one a good deal smaller than you);
 ## a burst runner spills most of its mass back onto the floor and comes back small. Bots fill the
-## seats players haven't, so the room's never empty.
+## seats players haven't, so the room's never empty: they're Crystaliens (other players are Mercury,
+## each in a colour of their own). Every round the room lays the arena out another way (its "mode"):
+## open sand, blocks for cover, blocks that slide back and forth, or a pit in the middle.
 ##
 ## Each game moves its own runner (and, for one of them, the bots) and sends where it is; the
 ## others show it as a puppet. What everyone must agree on (mass, drops, who burst whom, the
@@ -18,9 +21,13 @@ signal round_over(top: Array)
 signal round_started
 signal player_placed # the player's somewhere new (in, or back after a burst): the camera should jump there
 
-const WALL_COLOR := Color(0.2, 1.0, 0.45)
-const BLOCK_COLOR := Color(1.0, 0.2, 0.75)
-const SLAB_COLOR := Color(1.0, 0.5, 0.1)
+const BLOCK_COLOR := Color(0.6, 0.35, 0.95)
+const SLAB_COLOR := Color(1.0, 0.65, 0.25)
+const MOVER_COLOR := Color(1.0, 0.35, 0.5)
+const MODE_NAMES := { open = ["OPEN SAND", "nowhere to hide"], blocks = ["THE STONES", "use the cover"],
+	movers = ["SLIDING STONES", "they don't stop for you"], pit = ["THE PIT", "mind the middle"] }
+const Colosseum := preload("res://scripts/colosseum.gd")
+const Crystal := preload("res://scripts/crystal.gd")
 const Runner := preload("res://scripts/player.gd")
 const AiInput := preload("res://scripts/ai_input.gd")
 const BotInput := preload("res://scripts/bot_input.gd")
@@ -44,7 +51,9 @@ const TINTS := [
 	{ top = Color(0.2, 0.18, 0.02), horizon = Color(0.95, 1.0, 0.3), ground = Color(0.07, 0.07, 0.0), glow = Color(0.9, 1.0, 0.2), trail = Color(0.95, 1.0, 0.4) },
 ]
 
-var half := 70.0 # metres from the middle to each wall (the room's)
+var half := 70.0 # metres from the middle to the round wall (the room's)
+var mode := "" # this round's layout: "open" / "blocks" / "movers" / "pit"
+var pit := 0.0 # the pit's radius (0: none)
 var start_position := Vector3(0.0, 0.0, 30.0)
 var start_heading := 0.0
 var runner: CharacterBody3D # the player
@@ -54,6 +63,7 @@ var lane_plan: Array = [] # (no lane here)
 var server := ""
 var player_name := "RUNNER"
 var round_time := 0.0 # a room run here: its rounds, in seconds (0: the usual)
+var first_mode := "" # a room run here: its first layout ("": any)
 
 var online := false
 var me := 0 # this player's runner, once in the room
@@ -70,6 +80,9 @@ var peak := 0 # the most mass the player has had
 
 var _room: Node
 var _course: Node3D
+var _colosseum: Node3D
+var _movers: Array = [] # [{ body, home, travel, period, start }]
+var _round_clock := 0.0 # seconds into the round (the sliding blocks are placed by it)
 var _materials := {}
 var _drop_mesh := SphereMesh.new()
 var _send_clock := 0.0
@@ -86,7 +99,10 @@ func _ready() -> void:
 	drop_material.shader = preload("res://shaders/liquid_metal.gdshader")
 	drop_material.set_shader_parameter("agitation", 0.6)
 	_drop_mesh.material = drop_material
-	_build_course([]) # bare, till the room says what's in it
+	_colosseum = Colosseum.new()
+	_colosseum.radius = half
+	add_child(_colosseum)
+	_colosseum.ground.focus = runner # (the sand keeps its marks round him)
 	if server != "":
 		var net := ArenaNet.new()
 		_use_room(net)
@@ -133,6 +149,7 @@ func _go_local() -> void:
 	room.bots = 5 if with_enemies else 0
 	if round_time > 0.0:
 		room.round_time = round_time
+	room.first_mode = first_mode
 	_use_room(room)
 	room.open(player_name)
 
@@ -157,8 +174,8 @@ func _on_message(m: Dictionary) -> void:
 	match str(m.get("t")):
 		"welcome":
 			me = int(m.you)
-			half = float(m.half)
-			_build_course(m.blocks)
+			_lay_out(m)
+			_round_clock = float(m.get("at", 0.0)) / 1000.0
 			_set_drops(m.drops)
 			for e in m.ents:
 				_add_runner(e)
@@ -171,7 +188,7 @@ func _on_message(m: Dictionary) -> void:
 			mine.safe = float(m.get("safe", 2500.0)) / 1000.0
 			_respawn(mine)
 			runner.set_physics_process(true)
-			status.emit("ONLINE" if online else "ARENA", "grow  ·  dash  ·  burst")
+			status.emit(MODE_NAMES[mode][0], "ONLINE  ·  grow  ·  dash  ·  burst" if online else "grow  ·  dash  ·  burst")
 		"ent":
 			_add_runner(m)
 			if not bool(m.bot):
@@ -210,11 +227,14 @@ func _on_message(m: Dictionary) -> void:
 		"over":
 			phase = "over"
 			time_left = float(m.next) / 1000.0
+			_colosseum.cheer()
 			round_over.emit(m.top)
 		"round":
 			phase = "play"
 			time_left = float(m.ends) / 1000.0
 			smashes = 0
+			_lay_out(m)
+			_round_clock = 0.0
 			_set_drops(m.drops)
 			for e in m.ents:
 				var r := _r(e.id)
@@ -242,6 +262,10 @@ func _add_runner(e: Dictionary) -> void:
 		return
 	var r := { id = id, name = str(e.name), bot = bool(e.bot), mass = int(e.mass), alive = bool(e.alive), kills = int(e.get("kills", 0)),
 		mine = id == me, body = null, tag = null, tint = TINTS[id % TINTS.size()], safe = 0.0, down = 0.0, placed = false, wait = 0.0, ask = 0.0 }
+	if r.bot:
+		# A Crystalien: its crystal's colour
+		var color: Color = Crystal.COLORS[id % Crystal.COLORS.size()]
+		r.tint = { top = color.darkened(0.75), horizon = color, ground = color.darkened(0.9), glow = color, trail = color.lightened(0.3) }
 	runners[id] = r
 	if id == me:
 		r.body = runner
@@ -265,6 +289,7 @@ func _new_body(r: Dictionary, bot_here: bool) -> void:
 		input = AiInput.new() # (no body to drive: it does nothing)
 	var body := Runner.new()
 	body.input = input
+	body.crystal = r.bot # (the bots are Crystaliens; other players are Mercury)
 	body.add_child(input)
 	add_child(body)
 	body.make_brawler(r.tint)
@@ -319,7 +344,7 @@ func _respawn(r: Dictionary) -> void:
 		player_placed.emit()
 
 
-## Somewhere near a wall that's clear of things and of the other runners, facing in: [spot, heading]
+## Somewhere on the sand that's clear of things and of the other runners, facing in: [spot, heading]
 func _spawn_spot() -> Array:
 	var space := get_world_3d().direct_space_state
 	var probe := SphereShape3D.new()
@@ -329,7 +354,9 @@ func _spawn_spot() -> Array:
 	query.collision_mask = 1
 	var spot := Vector3.ZERO
 	for tries in 20:
-		spot = Vector3(_rng.randf_range(-half + 8.0, half - 8.0), 0.0, _rng.randf_range(-half + 8.0, half - 8.0))
+		var out := lerpf(maxf(pit + 10.0, half * 0.35), half - 8.0, sqrt(_rng.randf()))
+		var angle := _rng.randf() * TAU
+		spot = Vector3(cos(angle) * out, 0.0, sin(angle) * out)
 		var crowded := false
 		for r in runners.values():
 			if r.alive and is_instance_valid(r.body) and r.placed and r.body.global_position.distance_to(spot) < 14.0:
@@ -353,7 +380,7 @@ func _on_mine_down(id: int) -> void:
 		return
 	r.down = RESPAWN
 	if r.alive and phase == "play":
-		_room.send({ t = "died", e = id })
+		_room.send({ t = "died", e = id, how = "pit" if r.body.global_position.y < -1.5 else "wall" })
 
 
 func _on_kill(m: Dictionary) -> void:
@@ -375,11 +402,13 @@ func _on_kill(m: Dictionary) -> void:
 		v.body.blow_up(push)
 	_apply_mass(v)
 	if a.is_empty():
-		feed.emit("%s hit a wall" % v.name)
+		var fell: bool = m.get("how") == "pit"
+		feed.emit("%s fell in the pit" % v.name if fell else "%s hit a wall" % v.name)
 		if v.id == me:
-			status.emit("SPLAT", "lost %d" % int(m.lost))
+			status.emit("GONE" if fell else "SPLAT", "lost %d" % int(m.lost))
 		return
 	feed.emit("%s burst %s" % [a.name, v.name])
+	_colosseum.cheer(0.7)
 	if a.id == me:
 		smashes += 1
 		status.emit("BURST!", "%s  +%d" % [v.name, gained])
@@ -408,6 +437,11 @@ func _physics_process(delta: float) -> void:
 	if me == 0:
 		return
 	time_left = maxf(time_left - delta, 0.0)
+	if phase == "play":
+		_round_clock += delta
+	for mover in _movers:
+		var swing := sin(TAU * (_round_clock / float(mover.period) + float(mover.start)))
+		mover.body.position = mover.home + mover.travel * swing
 	for drop in drops.values():
 		if drop.taken > 0.0:
 			drop.taken -= delta
@@ -423,12 +457,16 @@ func _physics_process(delta: float) -> void:
 		if not r.mine:
 			continue
 		var body: CharacterBody3D = r.body
+		if not body.dead and body.global_position.y < -3.0:
+			body._splat() # down the pit
 		if body.dead:
 			r.down -= delta
 			if r.down <= 0.0:
 				_respawn(r)
 			continue
 		out.append_array(body.net_state(r.id))
+		if body.is_on_floor():
+			_colosseum.ground.trail(r.id, body.global_position, 0.32 * body.size, 0.05) # a furrow in the sand
 		if not r.alive:
 			# Up again here: the room has to say so too before it counts
 			r.ask -= delta
@@ -537,20 +575,30 @@ func _remove_drop(id: int) -> void:
 
 # --- Pieces ------------------------------------------------------------------------------
 
-## The floor, the walls (tall, green, for running along), the room's blocks (cover) and slabs
-## (to jump): [[x, z, width, height, depth, turn, kind], ...], and a boost pad toward each corner
-func _build_course(blocks: Array) -> void:
+## What's in the arena this round, as the room laid it out (m: its welcome or round message):
+## the floor (with the pit, if there is one), the blocks (cover) and slabs (to jump)
+## [[x, z, width, height, depth, turn, kind], ...], the sliding blocks [[x, z, width, height,
+## depth, turn, travel x, travel z, seconds there and back, start 0..1], ...], and four boost pads
+func _lay_out(m: Dictionary) -> void:
 	if _course:
 		_course.free()
 	_course = Node3D.new()
 	add_child(_course)
-	_build_floor()
-	for side in [-1.0, 1.0]:
-		_block(Vector3(half * 2.0 + 1.2, 8.0, 0.6), Vector3(0.0, 4.0, side * (half + 0.3)), WALL_COLOR)
-		_block(Vector3(0.6, 8.0, half * 2.0 + 1.2), Vector3(side * (half + 0.3), 4.0, 0.0), WALL_COLOR)
-	for b in blocks:
+	_movers.clear()
+	mode = str(m.get("mode", "blocks"))
+	if not MODE_NAMES.has(mode):
+		mode = "blocks"
+	pit = float(m.get("pit", 0.0))
+	half = float(m.get("radius", m.get("half", half)))
+	_colosseum.set_floor(pit)
+	for b in m.get("blocks", []):
 		var size := Vector3(float(b[2]), float(b[3]), float(b[4]))
 		_block(size, Vector3(float(b[0]), size.y * 0.5, float(b[1])), SLAB_COLOR if int(b[6]) == 1 else BLOCK_COLOR, float(b[5]))
+	for b in m.get("movers", []):
+		var size := Vector3(float(b[2]), float(b[3]), float(b[4]))
+		var home := Vector3(float(b[0]), size.y * 0.5, float(b[1]))
+		var body := _block(size, home, MOVER_COLOR, float(b[5]), true)
+		_movers.append({ body = body, home = home, travel = Vector3(float(b[6]), 0.0, float(b[7])), period = maxf(float(b[8]), 1.0), start = float(b[9]) })
 	for k in 4:
 		var pad := BoostPad.new()
 		var angle := k * TAU / 4.0 + PI / 4.0
@@ -569,8 +617,8 @@ func _material(color: Color) -> ShaderMaterial:
 	return _materials[color]
 
 
-func _block(size: Vector3, center: Vector3, color: Color, yaw := 0.0) -> void:
-	var body := StaticBody3D.new()
+func _block(size: Vector3, center: Vector3, color: Color, yaw := 0.0, moving := false) -> PhysicsBody3D:
+	var body: PhysicsBody3D = AnimatableBody3D.new() if moving else StaticBody3D.new()
 	body.position = center
 	body.rotation.y = yaw
 	var shape := BoxShape3D.new()
@@ -584,24 +632,37 @@ func _block(size: Vector3, center: Vector3, color: Color, yaw := 0.0) -> void:
 	view.mesh = mesh
 	view.material_override = _material(color)
 	body.add_child(view)
+	# Crystals growing out of it: tall ones from a block's top, a low jagged row along a slab (no
+	# higher than it can be jumped)
+	var low := size.y < 1.0
+	var growth := SurfaceTool.new()
+	growth.begin(Mesh.PRIMITIVE_TRIANGLES)
+	growth.set_smooth_group(-1)
+	for k in 5 if low else 4:
+		var spot := Vector3(_rng.randf_range(-0.38, 0.38) * size.x, 0.0, _rng.randf_range(-0.3, 0.3) * size.z)
+		var lean := Basis(Vector3.UP, _rng.randf() * TAU) * Basis(Vector3.RIGHT, _rng.randf_range(-0.3, 0.3))
+		if low:
+			spot.y = size.y * 0.5
+			Crystal.add_shard(growth, Transform3D(lean, spot), 0.22, 0.22, 0.5, 0.2)
+		else:
+			var tall := size.y * _rng.randf_range(0.5, 0.9)
+			spot.y = size.y * 0.5 + tall * 0.15
+			Crystal.add_shard(growth, Transform3D(lean, spot), minf(size.x, size.z) * 0.22, minf(size.x, size.z) * 0.22, tall, 0.4)
+	growth.generate_normals()
+	var shards := MeshInstance3D.new()
+	shards.mesh = growth.commit()
+	shards.material_override = _crystal_material(color)
+	body.add_child(shards)
 	_course.add_child(body)
+	return body
 
 
-func _build_floor() -> void:
-	var body := StaticBody3D.new()
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(half * 2.0 + 20.0, 2.0, half * 2.0 + 20.0)
-	var collider := CollisionShape3D.new()
-	collider.shape = shape
-	collider.position.y = -1.0
-	body.add_child(collider)
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(half * 2.0 + 20.0, half * 2.0 + 20.0)
-	var view := MeshInstance3D.new()
-	view.mesh = plane
-	var material := ShaderMaterial.new()
-	material.shader = preload("res://shaders/grid_floor.gdshader")
-	material.set_shader_parameter("line_color", Color(0.2, 1.0, 0.5))
-	view.material_override = material
-	body.add_child(view)
-	_course.add_child(body)
+func _crystal_material(color: Color) -> ShaderMaterial:
+	var key := "crystal %s" % color
+	if not _materials.has(key):
+		var material := ShaderMaterial.new()
+		material.shader = preload("res://shaders/crystal.gdshader")
+		material.set_shader_parameter("horizon", color)
+		material.set_shader_parameter("sky_top", color.darkened(0.7))
+		_materials[key] = material
+	return _materials[key]

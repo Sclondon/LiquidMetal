@@ -38,11 +38,17 @@ func _physics_process(delta: float) -> void:
 		aim = prey.body.global_position + prey.body.forward() * 2.0
 	else:
 		_prey = 0
-	# Near a wall: back toward the middle
-	var edge: float = arena.half - 10.0
-	if absf(here.x) > edge or absf(here.z) > edge:
+	# Near the wall: back toward the middle. Near the pit: round it, not in
+	var out := Vector2(here.x, here.z).length()
+	if out > arena.half - 10.0:
 		aim = aim.lerp(Vector3.ZERO, 0.75)
 		_prey = 0
+	elif arena.pit > 0.0:
+		var ahead: Vector3 = here + body.forward() * 9.0
+		if Vector2(ahead.x, ahead.z).length() < arena.pit + 3.0 or Vector2(aim.x, aim.z).length() < arena.pit + 1.5:
+			var away := Vector3(here.x, 0.0, here.z).normalized()
+			aim = here + away * 12.0 + away.cross(Vector3.UP) * 8.0 * signf(away.cross(Vector3.UP).dot(body.forward()) + 0.01)
+			_prey = 0
 	var to_aim := aim - here
 	var off := wrapf(atan2(-to_aim.x, -to_aim.z) - body.heading, -PI, PI)
 	var steer := clampf(-off * 2.2, -1.0, 1.0)
@@ -82,7 +88,7 @@ func _choose() -> void:
 	# Drops: the nearest (worth more, the bigger it is)
 	var best := INF
 	for drop in arena.drops.values():
-		if drop.taken > 0.0:
+		if drop.taken > 0.0 or Vector2(drop.x, drop.z).length() > arena.half - 2.5:
 			continue
 		var cost: float = Vector2(drop.x - here.x, drop.z - here.z).length() / (1.0 + drop.v * 0.4)
 		# (not one right behind it: it can't turn on the spot)

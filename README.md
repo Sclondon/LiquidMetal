@@ -6,7 +6,8 @@ The menu has four modes, and a difficulty:
 - **ENDLESS RUN**: a lane that never ends. Every 500 m a new zone (NEON DUSK, TOXIC TIDE, ICE CIRCUIT, INFERNO,
   THE VOID) with its own colours and new obstacles (zigzags, tunnels, pillars); faster and tighter as you go.
   Score = metres + 5 per drop + 50 per enemy smashed; best saved.
-- **ARENA**: an online battle room. Everyone who opens it is in the same walled 140 m square, fighting for
+- **ARENA**: an online battle room in the Crystaliens' colosseum (black sand, a crowd of them in the stands). The layout
+  changes every round: open sand, stones for cover, sliding stones, or a pit in the middle. Everyone who opens it is in the same room, fighting for
   the most mass before the 3-minute round ends: run over drops to grow, dash through other runners to burst them
   (or run into one much smaller), and get burst or hit a wall and you spill your mass and come back small. Bots fill
   empty seats; with no server it is bots only. Most mass you have held is saved.

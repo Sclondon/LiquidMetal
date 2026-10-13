@@ -1,6 +1,7 @@
 # Liquid Metal: notes for Claude
 
 A Godot 4.7 3D auto runner for the Scareathon arcade. You play Mercury, a figure made of liquid metal.
+The setting (the user's, 2026-10-12): the black sand moon of the Crystaliens, a people who build everything out of crystal. **No neon / Tron look**: no glowing grids or wireframe edges. The arena is their colosseum; the endless run is a ring road round the moon.
 The design doc covers what the game is and why: https://claude.ai/code/artifact/62a45f20-c913-4028-b4b6-cd79283da87d
 README.md covers the controls, modes and tests for players.
 
@@ -22,8 +23,10 @@ The whole scene is built in code. `scenes/main.tscn` is just `scripts/main.gd`.
   - Tube muscles (`TUBES`: neck, shoulders, hips, knees) are rebuilt every frame in an ImmediateMesh between the parts' jiggles (attach points in Blender coordinates), hidden when he goes to jelly or melts.
   - Stride/pump timing, and the dash's slash aimed in world space (`_slash` sweeps once over `SLASH_TIME`; `PUNCHES` in player.gd: L, R, then the X with both), with a fading trail.
 - Courses:
-  - `endless.gd`: chunks ahead, cleared behind, with zones every 500 m (the `ZONES` and `ZONE_KINDS` tables).
-  - `arena.gd`: the online battle room (agar.io style): a 140 m walled square where everyone fights for the most mass. Drops add mass, a dash through another runner bursts it (so does running into one 1.3x smaller), a burst runner spills 60% of its mass as drops and comes back at 10. Rounds are 3 minutes. Bots fill the room to 6 runners.
+  - `endless.gd`: chunks ahead, cleared behind, with zones every 500 m (the `ZONES` and `ZONE_KINDS` tables). The world round the lane is `ring_world.gd`: the ring road (a 90 m band of sand 1500 m out from the moon) and the moon, kept abreast of the runner because the lane itself is straight. The lane's ordinary walls are drawn as 1.1 m kerbs (`KERB`) but collide at full height.
+  - `colosseum.gd`: the arena's shell: round wall (72 straight lengths, for wall runs), stands, a multimesh crowd of Crystaliens (`cheer()`), spires, and the floor (`set_floor(pit)`; its `ground` is the shared SandGround, drawn only: the collider is made here).
+  - `crystal.gd`: crystal meshes (`shard`, `part` for a Crystalien runner's body parts, `spectator`) and the Crystaliens' colours.
+  - `arena.gd`: the online battle room (agar.io style): a round colosseum, 70 m radius, where everyone fights for the most mass. The room picks a layout ("mode") each round: `open`, `blocks`, `movers` (blocks sliding on the round's clock) or `pit` (fall in and you're lost). The bots are Crystaliens (`player.gd` `crystal = true`: Mercury's skeleton with a crystal for each part); other players are Mercury. Drops add mass, a dash through another runner bursts it (so does running into one 1.3x smaller), a burst runner spills 60% of its mass as drops and comes back at 10. Rounds are 3 minutes. Bots fill the room to 6 runners.
     - The room itself (mass, drops, who burst whom, the clock) is `arena_net.gd` (the site's server: `server/liquidMetal/arena.js` + `server/routes/liquidMetal.js` in scareathon-v3, at `/liquid-metal/ws`) or, when that can't be reached, `arena_room.gd` (the same rules run in the game, bots only). **The rules live in both `arena.js` and `arena_room.gd`: change them together.** The message list is at the top of `arena_net.gd`.
     - Each game moves its own runner and sends its state 15 times a second (`player.gd` `net_state` / `net_apply`, 11 bytes). Other players' runners are puppets (`make_puppet`). The bots are real runners with `bot_input.gd` at the controls, run by whichever game the server names (`bots` message); the rest see them as puppets.
     - In the room nobody collides with anybody (layer 2, mask 1): `arena.gd` works out hits and drop pickups by distance and claims them from the room; the first claim wins.
@@ -35,7 +38,8 @@ The whole scene is built in code. `scenes/main.tscn` is just `scripts/main.gd`.
 - `shaders/`:
   - `liquid_metal`: chrome faked with a painted horizon. Params: collapse, ball_radius, splash, real_reflection.
   - `puddles`: smooth-union SDF discs on a subdivided plane, lifted into a 3D bead by vertex displacement, with a clip rect. The player sets its colours for enemies (red).
-  - `sky` (custom sky: gradient, sun, skyline, stars; `sky_top` / `horizon` per zone), `grid_floor` (brushed plates, seams, rough), `obstacle` (Tron edges), `boost_pad`, `n64` (post filter).
+  - `sky` (custom sky: gradient, stars; `space` = 1 for the moon: stars all the way down, a plain star for a sun, no skyline; `ring` = 1 draws the ring overhead), `obstacle` (cut crystal: every block, wall and obstacle), `crystal` (shards and Crystaliens), `crowd`, `moon`, `pit`, `black_sand` (the test area's floor only), `boost_pad`, `n64` (post filter). `grid_floor` is no longer used.
+- Sand: `scripts/sand*.gd` and `dust.gd` are the shared component **GameCommon `godot/sand`** (from Outside), installed with `sh /c/Projects/GameCommon/kit.sh install godot/sand .`. Read its README there before changing them; `kit.sh diff` shows what this game has changed (nothing so far).
 - `art/build_mercury.py`: Blender script → `art/mercury.blend` + `models/mercury.glb`.
 
 ## Commands
@@ -55,11 +59,12 @@ Run the headless tests from this folder with `--headless --path . -s res://tests
 | `wallrun_test` | 2 PASS |
 | `chase_test` | PASS |
 | `arena_test` | 7 PASS (the local room; run it with `--fixed-fps 60` so its 45 s round goes quickly) |
+| `modes_test` | 3 PASS (pit, movers, open; `--fixed-fps 60`) |
 | `tools/arena_net_test.sh <scareathon-v3>/server` | 9 PASS: two copies of the game in one room on a local server (`tools/dev_relay.mjs`; needs `npm ci` in that server folder) |
 
 - `touch_test` fails its two hold-to-turn checks under `--fixed-fps 60`; run it without.
 
-- Screenshot scripts (`shots`, `model_shots`, `liquid_shots`, `slide_shots`, `crash_shots`, `wall_shots`, `enemy_shots`, `ui_shots`, `menu_shots`, `slash_shots`, `idle_shots`, `arena_shots`) need a window. The viewer ones are the easiest close-ups of Mercury. Run them without `--headless` and pass `-- <out dir>`.
+- Screenshot scripts (`shots`, `model_shots`, `liquid_shots`, `slide_shots`, `crash_shots`, `wall_shots`, `enemy_shots`, `ui_shots`, `menu_shots`, `slash_shots`, `idle_shots`, `arena_shots`, `colosseum_shots` (`-- <out dir> <mode>`), `ring_shots`) need a window. The viewer ones are the easiest close-ups of Mercury. Run them without `--headless` and pass `-- <out dir>`.
 - After changing a script, check that it parses by running a test. `--check-only` trips on autoloads/class names.
 
 Rebuild the character (Blender 4.3):

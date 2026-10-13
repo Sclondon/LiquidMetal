@@ -22,6 +22,7 @@ func _initialize() -> void:
 	main.start_mode = "arena"
 	main.use_pads = false
 	main.arena_round = 45.0
+	main.arena_mode = "blocks"
 	root.add_child(main)
 
 
@@ -45,7 +46,7 @@ func _process(delta: float) -> bool:
 					if text.ends_with("hit a wall"):
 						wall_deaths += 1)
 				_check("in the room: %d runners, %d drops, %d blocks" % [arena.runners.size(), arena.drops.size(), arena._course.get_child_count()],
-					arena.runners.size() == 6 and arena.drops.size() == 110 and p.is_physics_processing() and not arena.online)
+					arena.runners.size() == 6 and arena.drops.size() == 110 and arena.mode == "blocks" and p.is_physics_processing() and not arena.online)
 				step = 1
 				t = 0.0
 		1:
@@ -108,8 +109,8 @@ func _process(delta: float) -> bool:
 		6:
 			p.run_speed = 0.0
 			if rounds.started > 0:
-				_check("the round ends on the clock and a new one starts (%.0f s in; %d bot wall splats)" % [total, wall_deaths],
-					rounds.over == 1 and arena.phase == "play" and arena.my_mass() == 10 and arena.drops.size() == 110)
+				_check("the round ends on the clock and a new one starts, laid out another way: %s (%.0f s in; %d bot wall splats)" % [arena.mode, total, wall_deaths],
+					rounds.over == 1 and arena.phase == "play" and arena.my_mass() == 10 and arena.drops.size() >= 110 and arena.mode != "blocks")
 				step = 7
 	if step == 7 or total > 90.0:
 		if step != 7:

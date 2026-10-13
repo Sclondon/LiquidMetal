@@ -207,8 +207,9 @@ func _ready() -> void:
 		add_child(eye)
 		_puddle_eyes.append(eye)
 
-	_figure_material.shader = _material.shader
+	_figure_material.shader = preload("res://shaders/crystal.gdshader") if crystal else _material.shader
 	_figure_material.set_shader_parameter("ripple", 0.35) # facets: only a shimmer
+	_figure.crystal = crystal
 	# (the same dusk-lit liquid metal as the drops you collect)
 	_figure.material = _figure_material
 	add_child(_figure)
@@ -557,6 +558,8 @@ func set_tint(tint: Dictionary) -> void:
 # runner: no collisions at all, moved by the states their game sends.
 
 var puppet := false
+## A Crystalien (the arena's bots): cut from crystal, not liquid metal. Set before it's in the tree.
+var crystal := false
 var size := 1.0 # grown with its mass (the arena sets it)
 var _brawling := false
 var _net_pos := Vector3.ZERO
@@ -980,7 +983,7 @@ func _process(delta: float) -> void:
 	_punch = move_toward(_punch, 1.0 if is_dashing() else 0.0, delta * (14.0 if is_dashing() else 4.0))
 	_figure.set_punch(cock, _punch, PUNCHES[_punch_index])
 	var liquid := (not grounded() and not wall_running) or _liquid_hold > 0.0
-	_figure.set_liquid(1.0 if liquid else 0.0, delta)
+	_figure.set_liquid(1.0 if liquid and not crystal else 0.0, delta) # (crystal doesn't go to jelly)
 
 	# Now and then, running, a blob or two shakes loose
 	_drip_clock -= delta

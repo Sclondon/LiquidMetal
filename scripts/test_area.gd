@@ -230,7 +230,7 @@ func _build_floor() -> void:
 	var view := MeshInstance3D.new()
 	view.mesh = plane
 	var material := ShaderMaterial.new()
-	material.shader = preload("res://shaders/grid_floor.gdshader")
+	material.shader = preload("res://shaders/black_sand.gdshader")
 	view.material_override = material
 	body.add_child(view)
 	add_child(body)

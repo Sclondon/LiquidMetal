@@ -9,7 +9,9 @@ signal message(m: Dictionary)
 signal states(data: PackedByteArray) # (never: nobody else is here)
 signal failed
 
-const HALF := 70.0
+const RADIUS := 70.0
+const MODES := ["open", "blocks", "movers", "pit"]
+const PIT_RADIUS := 14.0
 const START_MASS := 10
 const SAFE := 2.5
 const DROPS := 110
@@ -24,10 +26,15 @@ var online := false
 ## How many bots share the room (0: an empty room, for tests)
 var bots := 5
 var round_time := 180.0
+## The first round's layout ("": any)
+var first_mode := ""
 
 var _ents := {} # id -> { id, name, bot, mass, alive, kills, x, z, safe_until, died_at }
 var _drops := {} # id -> [x, z, value]
 var _blocks: Array = []
+var _movers: Array = []
+var _pit := 0.0
+var _mode := ""
 var _next_drop := 1
 var _phase := "play"
 var _until := 0.0
@@ -40,23 +47,16 @@ var _rng := RandomNumberGenerator.new()
 func open(player_name: String) -> void:
 	_rng.randomize()
 	_until = round_time
-	while _blocks.size() < 26:
-		var x := snappedf(_rng.randf_range(-HALF + 9.0, HALF - 9.0), 0.01)
-		var z := snappedf(_rng.randf_range(-HALF + 9.0, HALF - 9.0), 0.01)
-		if _blocks.any(func(b): return Vector2(b[0] - x, b[1] - z).length() < 11.0):
-			continue
-		if _blocks.size() % 2 == 0:
-			_blocks.append([x, z, _rng.randf_range(2.0, 5.0), _rng.randf_range(2.5, 5.0), _rng.randf_range(2.0, 5.0), _rng.randf_range(0.0, PI), 0])
-		else:
-			_blocks.append([x, z, _rng.randf_range(4.0, 8.0), 0.7, _rng.randf_range(1.0, 2.0), _rng.randf_range(0.0, PI), 1])
-	for i in DROPS:
-		_scatter_drop()
+	_lay_out(first_mode if first_mode != "" else MODES[_rng.randi() % MODES.size()])
+	_lay_drops()
 	_add_ent(player_name, false)
 	var bot_ids := []
 	for i in bots:
 		bot_ids.append(_add_ent(BOT_NAMES[i % BOT_NAMES.size()], true).id)
-	_out.append({ t = "welcome", you = 1, half = HALF, blocks = _blocks, drops = _drop_list(), ents = _ents.values().map(_describe),
-		phase = _phase, ends = round_time * 1000.0, safe = SAFE * 1000.0 })
+	var welcome := { t = "welcome", you = 1, drops = _drop_list(), ents = _ents.values().map(_describe),
+		phase = _phase, ends = round_time * 1000.0, at = 0.0, safe = SAFE * 1000.0 }
+	welcome.merge(_layout())
+	_out.append(welcome)
 	_out.append({ t = "bots", ids = bot_ids })
 
 
@@ -85,7 +85,7 @@ func send(m: Dictionary) -> void:
 			var ent: Dictionary = _ents.get(int(m.e), {})
 			if ent.is_empty() or not ent.alive or _phase != "play":
 				return
-			_kill(ent, {}, "wall")
+			_kill(ent, {}, "pit" if m.get("how") == "pit" else "wall")
 		"spawn":
 			var ent: Dictionary = _ents.get(int(m.e), {})
 			if ent.is_empty() or ent.alive or _clock - ent.died_at < DEAD_TIME:
@@ -127,18 +127,20 @@ func _process(delta: float) -> void:
 				if not fresh.is_empty():
 					_out.append({ t = "drops", list = fresh })
 		elif _clock >= _until:
-			# A new round: everyone back to the start, the floor relaid
+			# A new round: everyone back to the start, and the arena laid out another way
 			_phase = "play"
 			_until = _clock + round_time
-			_drops.clear()
-			for i in DROPS:
-				_scatter_drop()
+			var others := MODES.filter(func(mode): return mode != _mode)
+			_lay_out(others[_rng.randi() % others.size()])
+			_lay_drops()
 			for ent in _ents.values():
 				ent.mass = START_MASS
 				ent.alive = true
 				ent.kills = 0
 				ent.safe_until = _clock + SAFE
-			_out.append({ t = "round", ends = round_time * 1000.0, drops = _drop_list(), ents = _ents.values().map(_describe) })
+			var round := { t = "round", ends = round_time * 1000.0, drops = _drop_list(), ents = _ents.values().map(_describe) }
+			round.merge(_layout())
+			_out.append(round)
 	# What it has to say, in order (never from inside send(): the arena's in the middle of a step)
 	while not _out.is_empty():
 		message.emit(_out.pop_front())
@@ -161,7 +163,59 @@ func _drop_list() -> Array:
 	return list
 
 
+## Somewhere on the floor at least `margin` in from the wall (and clear of the pit)
+func _spot(margin: float) -> Vector2:
+	for tries in 40:
+		var reach := sqrt(_rng.randf()) * (RADIUS - margin)
+		if reach > _pit + 3.0 or _pit == 0.0:
+			return Vector2.from_angle(_rng.randf() * TAU) * reach
+	return Vector2(RADIUS * 0.5, 0.0)
+
+
+## A round's layout, by its mode (see layOut in arena.js: blocks, movers and the pit)
+func _lay_out(mode: String) -> void:
+	_mode = mode
+	_blocks = []
+	_movers = []
+	_pit = PIT_RADIUS if mode == "pit" else 0.0
+	var blocks: int = { open = 0, blocks = 26, movers = 8, pit = 14 }[mode]
+	var tries := 0
+	while _blocks.size() < blocks and tries < 2000:
+		tries += 1
+		var at := _spot(9.0)
+		if _blocks.any(func(b): return Vector2(b[0] - at.x, b[1] - at.y).length() < 11.0):
+			continue
+		if _blocks.size() % 2 == 0:
+			_blocks.append([at.x, at.y, _rng.randf_range(2.0, 5.0), _rng.randf_range(2.5, 5.0), _rng.randf_range(2.0, 5.0), _rng.randf_range(0.0, PI), 0])
+		else:
+			_blocks.append([at.x, at.y, _rng.randf_range(4.0, 8.0), 0.7, _rng.randf_range(1.0, 2.0), _rng.randf_range(0.0, PI), 1])
+	if mode == "movers":
+		for i in 9:
+			var middle := Vector2.from_angle(i / 9.0 * TAU + _rng.randf_range(-0.2, 0.2)) * _rng.randf_range(0.25, 0.7) * RADIUS
+			var along := _rng.randf_range(0.0, PI)
+			var travel := Vector2.from_angle(along) * _rng.randf_range(9.0, 16.0)
+			_movers.append([middle.x, middle.y, _rng.randf_range(5.0, 9.0), _rng.randf_range(3.0, 4.5), _rng.randf_range(1.5, 2.5),
+				PI / 2.0 - along, travel.x, travel.y, _rng.randf_range(5.0, 9.0), _rng.randf()])
+
+
+func _layout() -> Dictionary:
+	return { mode = _mode, radius = RADIUS, blocks = _blocks, movers = _movers, pit = _pit }
+
+
+## A round's drops: scattered, and round a pit a ring of fat ones on its lip
+func _lay_drops() -> void:
+	_drops.clear()
+	for i in DROPS:
+		_scatter_drop()
+	if _pit > 0.0:
+		for i in 12:
+			var at := Vector2.from_angle(i / 12.0 * TAU) * (_pit + 2.6)
+			_add_drop(at.x, at.y, 3)
+
+
 func _in_block(x: float, z: float) -> bool:
+	if Vector2(x, z).length() < _pit + 2.5:
+		return true
 	return _blocks.any(func(b): return Vector2(b[0] - x, b[1] - z).length() < maxf(b[2], b[4]) * 0.75 + 1.2)
 
 
@@ -174,10 +228,9 @@ func _add_drop(x: float, z: float, value: int) -> Array:
 
 func _scatter_drop() -> Array:
 	for tries in 8:
-		var x := _rng.randf_range(-HALF + 3.0, HALF - 3.0)
-		var z := _rng.randf_range(-HALF + 3.0, HALF - 3.0)
-		if not _in_block(x, z):
-			return _add_drop(x, z, 1)
+		var at := _spot(3.0)
+		if not _in_block(at.x, at.y):
+			return _add_drop(at.x, at.y, 1)
 	return []
 
 
@@ -198,12 +251,13 @@ func _kill(victim: Dictionary, by: Dictionary, how: String) -> void:
 		left -= value
 		var angle := _rng.randf() * TAU
 		var reach := _rng.randf_range(1.5, 5.0)
-		var x := clampf(victim.x + cos(angle) * reach, -HALF + 2.0, HALF - 2.0)
-		var z := clampf(victim.z + sin(angle) * reach, -HALF + 2.0, HALF - 2.0)
-		if _in_block(x, z):
-			x = victim.x # (it got there, so a drop there can be reached)
-			z = victim.z
-		spilled.append(_add_drop(x, z, value))
+		var at := (Vector2(victim.x, victim.z) + Vector2.from_angle(angle) * reach).limit_length(RADIUS - 2.0)
+		if _in_block(at.x, at.y):
+			at = Vector2(victim.x, victim.z) # (it got there, so a drop there can be reached)
+		if at.length() < _pit + 2.5:
+			# Lost down the pit: its drops land on the lip, out the way it came
+			at = Vector2.from_angle(atan2(victim.z, victim.x) + _rng.randf_range(-0.5, 0.5)) * (_pit + _rng.randf_range(2.6, 5.0))
+		spilled.append(_add_drop(at.x, at.y, value))
 	if not by.is_empty():
 		by.mass += KILL_BONUS + int(lost * KILL_SHARE)
 		by.kills += 1
