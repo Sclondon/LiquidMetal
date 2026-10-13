@@ -2,7 +2,7 @@ extends CanvasLayer
 ## The HUD: a stats panel top left (what the mode's about: metres, mass, drops, smashes), a banner
 ## for zones and the arena's news, the arena's standings (top right) and a line of who burst whom,
 ## the round DASH button, and a TUNE panel with sliders for the feel (speed, turning, jump, camera)
-## plus restart / menu. In the arena the feel sliders and restart are put away: it's a shared room.
+## plus restart / menu. The look is ui_theme.gd's: gel and chrome, the year 2001. In the arena the feel sliders and restart are put away: it's a shared room.
 
 const UI := preload("res://scripts/ui_theme.gd")
 
@@ -51,13 +51,13 @@ func _ready() -> void:
 	_stats_box.add_child(lines)
 	_big.add_theme_font_size_override("font_size", 40)
 	_small.add_theme_font_size_override("font_size", 18)
-	_small.add_theme_color_override("font_color", UI.CYAN)
+	_small.add_theme_color_override("font_color", UI.LIME)
 	lines.add_child(_big)
 	lines.add_child(_small)
 	root.add_child(_stats_box)
 	set_stats("", "")
 	# The banner: zones, waves
-	_banner = UI.heading("", 64)
+	_banner = UI.heading("", 60, UI.ORANGE)
 	_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 0)
 	_banner.offset_top = 150
 	_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -84,7 +84,7 @@ func _ready() -> void:
 	# ...and who burst whom, under the stats
 	_feed.position = Vector2(18, 104)
 	_feed.add_theme_font_size_override("font_size", 18)
-	_feed.add_theme_color_override("font_color", UI.PINK)
+	_feed.add_theme_color_override("font_color", UI.ORANGE)
 	_feed.add_theme_color_override("font_outline_color", Color(0.02, 0.01, 0.05))
 	_feed.add_theme_constant_override("outline_size", 6)
 	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -95,13 +95,11 @@ func _ready() -> void:
 	_dash.text = "DASH"
 	_dash.custom_minimum_size = Vector2(140, 140)
 	_dash.add_theme_font_size_override("font_size", 28)
-	# Round
-	for state in ["normal", "hover", "pressed", "focus"]:
-		var round_box: StyleBoxFlat = (theme.get_stylebox(state, "Button") as StyleBoxFlat).duplicate()
-		round_box.set_corner_radius_all(70)
-		round_box.border_color = UI.PINK
-		round_box.set_border_width_all(4)
-		_dash.add_theme_stylebox_override(state, round_box)
+	# A round gel button in a chrome ring: orange, brighter under the thumb
+	_dash.add_theme_stylebox_override("normal", UI.orb(UI.ORANGE.darkened(0.25)))
+	_dash.add_theme_stylebox_override("hover", UI.orb(UI.ORANGE))
+	_dash.add_theme_stylebox_override("pressed", UI.orb(UI.LIME.darkened(0.2)))
+	_dash.add_theme_stylebox_override("focus", UI.orb(UI.ORANGE.darkened(0.25)))
 	_dash.focus_mode = Control.FOCUS_NONE
 	_dash.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 24)
 	_dash.grow_horizontal = Control.GROW_DIRECTION_BEGIN
@@ -231,7 +229,7 @@ func set_board(rows: Array, title: String) -> void:
 		if not line.visible:
 			continue
 		var mine: bool = k > 0 and rows[k - 1].me
-		var color: Color = UI.PINK if k == 0 else (UI.CYAN if mine else UI.CHROME)
+		var color: Color = UI.AQUA if k == 0 else (UI.LIME if mine else UI.CHROME)
 		var left: Label = line.get_child(0)
 		var right: Label = line.get_child(1)
 		left.text = title if k == 0 else "%d  %s" % [k, rows[k - 1].name]

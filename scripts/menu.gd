@@ -34,7 +34,12 @@ func _ready() -> void:
 	root.theme = UI.make()
 	add_child(root)
 	_shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_shade.color = Color(0.02, 0.01, 0.05, 0.5)
+	_shade.color = Color(0.0, 0.03, 0.1, 0.55)
+	# (and fine lines across it, like a monitor of the time)
+	var lines := ShaderMaterial.new()
+	lines.shader = Shader.new()
+	lines.shader.code = "shader_type canvas_item;\nvoid fragment() {\n\tfloat line = step(0.5, fract(FRAGCOORD.y / 3.0));\n\tCOLOR = vec4(COLOR.rgb, COLOR.a * (0.82 + 0.18 * line));\n}\n"
+	_shade.material = lines
 	_shade.mouse_filter = Control.MOUSE_FILTER_STOP # nothing behind the menu takes touches
 	root.add_child(_shade)
 
@@ -49,12 +54,12 @@ func _ready() -> void:
 	var name_box := HBoxContainer.new()
 	name_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	name_box.add_theme_constant_override("separation", 24)
-	name_box.add_child(UI.heading("LIQUID", 76))
-	name_box.add_child(UI.heading("METAL", 76, UI.CYAN))
+	name_box.add_child(UI.heading("LIQUID", 64))
+	name_box.add_child(UI.heading("METAL", 64, UI.LIME))
 	_title.add_child(name_box)
 	_bests.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_bests.add_theme_font_size_override("font_size", 22)
-	_bests.add_theme_color_override("font_color", UI.PINK)
+	_bests.add_theme_color_override("font_color", UI.LIME)
 	_title.add_child(_bests)
 	_title.add_child(_spacer(6))
 	_title.add_child(_button("ENDLESS RUN", "how far can you get?", func(): endless_chosen.emit()))
@@ -62,13 +67,13 @@ func _ready() -> void:
 	_title.add_child(_button("TEST AREA", "play around", func(): test_area_chosen.emit()))
 	_title.add_child(_button("MODEL VIEWER", "get a good look at Mercury", func(): viewer_chosen.emit()))
 	var story := _button("STORY", "", func(): story_chosen.emit())
-	story.custom_minimum_size.y = 52
+	story.custom_minimum_size.y = 46
 	story.add_theme_font_size_override("font_size", 22)
 	_title.add_child(story)
 	# The difficulty: press to step through them (left / right on a gamepad or keys step back too)
 	_difficulty = _button("", "", func(): _step_difficulty(1))
-	_difficulty.custom_minimum_size.y = 84
-	_difficulty.add_theme_font_size_override("font_size", 24)
+	_difficulty.custom_minimum_size.y = 74
+	_difficulty.add_theme_font_size_override("font_size", 21)
 	_difficulty.gui_input.connect(func(event: InputEvent):
 		for step in [[&"ui_left", -1], [&"ui_right", 1]]:
 			if event.is_action_pressed(step[0]):
@@ -90,7 +95,7 @@ func _ready() -> void:
 	_result.add_theme_font_size_override("font_size", 46)
 	_result_more.add_theme_font_size_override("font_size", 24)
 	_result_best.add_theme_font_size_override("font_size", 26)
-	_result_best.add_theme_color_override("font_color", UI.PINK)
+	_result_best.add_theme_color_override("font_color", UI.LIME)
 	_over.add_child(_spacer(6))
 	_over.add_child(_button("AGAIN", "", func(): again_chosen.emit()))
 	_over.add_child(_button("MENU", "", func(): menu_chosen.emit()))
@@ -127,7 +132,7 @@ func _step_difficulty(by: int) -> void:
 
 func _show_difficulty() -> void:
 	var tier: Dictionary = Difficulty.TIERS[_level]
-	_difficulty.text = "<   DIFFICULTY: %s   >\n%s" % [tier.name, tier.note]
+	_difficulty.text = "<   DIFFICULTY: %s   >\n%s" % [tier.name, str(tier.note).to_upper()]
 
 
 ## headline: the big result; more: the details; best: the best line (or NEW BEST!)
@@ -177,8 +182,8 @@ func _spacer(height: int) -> Control:
 func _button(text: String, sub: String, pressed: Callable) -> Button:
 	var button := Button.new()
 	button.text = text if sub == "" else "%s\n%s" % [text, sub]
-	button.custom_minimum_size = Vector2(440, 84 if sub != "" else 72)
-	button.add_theme_font_size_override("font_size", 28)
+	button.custom_minimum_size = Vector2(470, 74 if sub != "" else 62)
+	button.add_theme_font_size_override("font_size", 23)
 	button.focus_mode = Control.FOCUS_ALL # (a gamepad moves between them and presses A)
 	button.pressed.connect(pressed)
 	return button
