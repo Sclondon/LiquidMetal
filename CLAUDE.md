@@ -42,6 +42,15 @@ The whole scene is built in code. `scenes/main.tscn` is just `scripts/main.gd`.
 - Sand: `scripts/sand*.gd` and `dust.gd` are the shared component **GameCommon `godot/sand`** (from Outside), installed with `sh /c/Projects/GameCommon/kit.sh install godot/sand .`. Read its README there before changing them; `kit.sh diff` shows what this game has changed (nothing so far).
 - `art/build_mercury.py`: Blender script → `art/mercury.blend` + `models/mercury.glb`.
 
+## State after 2026-10-12/13 (read with the layout above; some lines there are older)
+
+- **Endless** is the whole top of the ring now (56 m wide, no lane walls): breaks to fall into, crystal formations to jump / duck / dodge, crystals that fall from the sky and stay (`crystal_fall.gd`), aurora rings for boosts (`boost_pad.gd`, used by the arena too), companion ring bands and a moon with an atmosphere shell lit by three suns (`ring_world.gd`, `moon_air` / `ring_band` shaders). `plan` lists what's laid; `lane_plan` is empty. Tests: `endless_bot` (2000 m, no splats) and `ring_test` (7 checks; "an enemy keeps off the edge" fails more often than not since the merge with the dash wall and wants looking at), both with `--fixed-fps 60`.
+- **Arena**: the layout changes every 45 s inside a round as well (`layout` message, 3.5 s warning; stones sink and rise through the sand). The dash leaves a standing wall of metal (`metal_wall.gd`) that bursts anyone else who runs into it (`died` with `how: "trail", by`). The crowd reacts (`colosseum.gd`: cheer / wave / flash / gasp). Stones are crystal formations over box colliders. `palace.gd` is the architecture round the colosseum (Crystal Palace + McQuarrie / Jodorowsky's Dune, the user's references).
+- **Crystaliens** (bots) shatter into shards, have no droplets or puddles, and leave sprouting crystals (`crystal_trail.gd`). Mercury's puddles run back into him when they go (`_resorb`), and as a puddle he slows to a stop.
+- **Sky**: `sky.gdshader` paints the fixed deep sky and three suns; `sky_show.gd` / `sky_show.gdshader` is the animated layer (comets, supernovae, a turning figure, aurora, motes) on a ball round the camera.
+- **Story**: `cinematic.gd`, played before the menu the first time and from its STORY button. Long-lens shots climbing Mercury from his feet to his face, cut with glimpses; a few lowercase words. `tests/story_shots.gd` captures every beat.
+- Crystal shaders read the screen (`hint_screen_texture`) and use `depth_draw_always`; without that, crystals draw over each other in the wrong order.
+
 ## Commands
 
 Godot (Steam):
